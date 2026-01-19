@@ -180,18 +180,25 @@ static int parse_header_line(struct Session* session,
   rc = parse_seconds_value(sec, line_no, err_buf, err_len, &seconds);
   if (rc != 0)
     return -1;
-  if (session->group_count >= MAX_GROUPS)
+  size_t group_index = session->group_count;
+  size_t item_count = session->item_count;
+  const char* buffer = session->buffer;
+
+  if (group_index >= MAX_GROUPS)
     return set_error_line(err_buf, err_len, line_no, "too many groups");
 
-  struct Group* group = &session->groups[session->group_count];
+  struct Group* group = &session->groups[group_index];
   size_t name_length = strlen(name);
 
   if (name_length > MAX_LINE_LEN)
     return set_error_line(err_buf, err_len, line_no, "group name too long");
-  group->name_offset = (u32)(name - session->buffer);
+
+  size_t name_offset = (size_t)(name - buffer);
+
+  group->name_offset = (u32)name_offset;
   group->name_length = (u32)name_length;
   group->seconds = (u32)seconds;
-  group->item_start = (u32)session->item_count;
+  group->item_start = (u32)item_count;
   group->item_count = 0;
   session->group_count++;
   return 0;
@@ -223,7 +230,8 @@ static int parse_item_line(struct Session* session,
     return set_error_line(
         err_buf, err_len, state->line_no, "too many items in group");
 
-  struct Item* item = &session->items[session->item_count];
+  size_t item_index = session->item_count;
+  struct Item* item = &session->items[item_index];
 
   item->offset = (u32)line_start;
   item->length = (u32)line_len;
