@@ -133,8 +133,10 @@ static int init_item_order(const struct ctx* c, size_t group_index) {
   if (!assert_ok(group_index < c->session->group_count))
     return -1;
 
-  size_t count = c->session->groups[group_index].item_count;
-  size_t start = c->session->groups[group_index].item_start;
+  struct Session* session = c->session;
+  const struct Group* group = &session->groups[group_index];
+  size_t count = group->item_count;
+  size_t start = group->item_start;
 
   if (!assert_ok(count > 0))
     return -1;
