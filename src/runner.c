@@ -166,8 +166,10 @@ static int select_next_group(const struct ctx* c, struct runtime* rt) {
     return -1;
 
   if (rt->order_pos >= c->session->group_count) {
-    int rc =
-        rng_shuffle_groups(c->rng, c->group_order, c->session->group_count);
+    struct Rng* rng = c->rng;
+    size_t* group_order = c->group_order;
+    size_t group_count = c->session->group_count;
+    int rc = rng_shuffle_groups(rng, group_order, group_count);
     if (rc != 0)
       return -1;
     rt->order_pos = 0;
@@ -475,7 +477,11 @@ static int init_runtime(const struct ctx* c, struct runtime* rt) {
 
   if (rc != 0)
     return -1;
-  rc = rng_shuffle_groups(c->rng, c->group_order, c->session->group_count);
+  struct Rng* rng = c->rng;
+  size_t* group_order = c->group_order;
+  size_t group_count = c->session->group_count;
+
+  rc = rng_shuffle_groups(rng, group_order, group_count);
   if (rc != 0)
     return -1;
   rc = select_next_group(c, rt);
