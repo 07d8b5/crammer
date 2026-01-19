@@ -201,10 +201,12 @@ static int select_next_item(const struct ctx* c, struct runtime* rt) {
     return -1;
   if (!validate_ptr(c->item_order))
     return -1;
-  if (!assert_ok(rt->group_index < c->session->group_count))
+  struct Session* session = c->session;
+  size_t group_count = session->group_count;
+
+  if (!assert_ok(rt->group_index < group_count))
     return -1;
 
-  struct Session* session = c->session;
   size_t group_index = rt->group_index;
   const struct Group* group = &session->groups[group_index];
   size_t count = group->item_count;
