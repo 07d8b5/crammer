@@ -277,7 +277,7 @@ static int advance_prompt(const struct ctx *c, struct runtime *rt,
 	rc = draw_prompt(c->session, rt->item_index);
 	if (rc != 0)
 		return -1;
-	rc = log_prompt(rt->group_index, rt->item_index);
+	rc = log_prompt(c->session, rt->group_index, rt->item_index);
 	if (rc != 0)
 		return -1;
 	return 0;
@@ -483,7 +483,7 @@ static int init_runtime(const struct ctx *c, struct runtime *rt)
 	rc = draw_prompt(c->session, rt->item_index);
 	if (rc != 0)
 		return -1;
-	rc = log_prompt(rt->group_index, rt->item_index);
+	rc = log_prompt(c->session, rt->group_index, rt->item_index);
 	if (rc != 0)
 		return -1;
 	rc = update_group_timer(c, rt);

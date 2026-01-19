@@ -51,6 +51,9 @@ int app_run_file(const char *path)
 	rc = log_open(&g_app.session);
 	if (rc != 0)
 		return -1;
+	rc = log_input(&g_app.session, path);
+	if (rc != 0)
+		return -1;
 	rc = rng_init(&g_app.rng);
 	if (rc != 0)
 		return -1;

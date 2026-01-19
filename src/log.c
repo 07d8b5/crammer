@@ -12,6 +12,56 @@
 
 static int g_log_fd = -1;
 
+static u32 cksum_update(u32 crc, unsigned char b)
+{
+	crc ^= (u32)b << 24;
+	for (int i = 0; i < 8; i++) {
+		if (crc & 0x80000000U)
+			crc = (crc << 1) ^ 0x04C11DB7U;
+		else
+			crc <<= 1;
+	}
+	return crc;
+}
+
+static u32 cksum_bytes(const unsigned char *buf, size_t len)
+{
+	u32 crc = 0;
+
+	for (size_t i = 0; i < len; i++)
+		crc = cksum_update(crc, buf[i]);
+
+	size_t n = len;
+
+	while (n != 0) {
+		crc = cksum_update(crc, (unsigned char)(n & 0xFF));
+		n >>= 8;
+	}
+	return ~crc;
+}
+
+static size_t sanitize_path(const char *path, char *out, size_t out_len)
+{
+	if (!out_len)
+		return 0;
+	if (!path) {
+		out[0] = '\0';
+		return 0;
+	}
+
+	size_t j = 0;
+	for (size_t i = 0; path[i] != '\0'; i++) {
+		if (j + 1 >= out_len)
+			break;
+		char ch = path[i];
+		if (ch == '\n' || ch == '\r')
+			ch = ' ';
+		out[j++] = ch;
+	}
+	out[j] = '\0';
+	return j;
+}
+
 static int write_all_fd(int fd, const char *buf, size_t len)
 {
 	if (!validate_ok(fd >= 0))
@@ -124,8 +174,14 @@ int log_key(int key)
 	return log_write("key", msg);
 }
 
-int log_prompt(size_t group_index, size_t item_index)
+int log_prompt(const struct Session *session, size_t group_index, size_t item_index)
 {
+	if (!validate_ptr(session))
+		return -1;
+	if (!assert_ok(group_index < session->group_count))
+		return -1;
+	if (!assert_ok(item_index < session->item_count))
+		return -1;
 	if (!assert_ok(group_index < MAX_GROUPS))
 		return -1;
 	if (!assert_ok(item_index < MAX_ITEMS_TOTAL))
@@ -133,9 +189,30 @@ int log_prompt(size_t group_index, size_t item_index)
 	if (g_log_fd < 0)
 		return 0;
 
+	const struct Group *group = &session->groups[group_index];
+	const struct Item *item = &session->items[item_index];
+
+	if (!assert_ok((size_t)group->name_offset + (size_t)group->name_length <=
+		       session->buffer_len))
+		return -1;
+	if (!assert_ok((size_t)item->offset + (size_t)item->length <=
+		       session->buffer_len))
+		return -1;
+
+	const unsigned char *gname =
+		(const unsigned char *)&session->buffer[group->name_offset];
+	const unsigned char *ibytes =
+		(const unsigned char *)&session->buffer[item->offset];
+
+	u32 gck = cksum_bytes(gname, (size_t)group->name_length);
+	u32 ick = cksum_bytes(ibytes, (size_t)item->length);
+
 	char msg[96];
-	int rc = snprintf(msg, sizeof(msg), "group=%zu item=%zu",
-		      group_index, item_index);
+	int rc = snprintf(msg, sizeof(msg),
+			  "group=%zu item=%zu gck=%u glen=%u ick=%u ilen=%u",
+			  group_index, item_index, gck,
+			  (unsigned int)group->name_length, ick,
+			  (unsigned int)item->length);
 	if (!assert_ok(rc > 0))
 		return -1;
 	if (!assert_ok((size_t)rc < sizeof(msg)))
@@ -179,6 +256,37 @@ int log_shuffle(const char *tag, size_t group_index)
 	if (!assert_ok((size_t)rc < sizeof(msg)))
 		return -1;
 	return log_write(tag, msg);
+}
+
+int log_input(const struct Session *session, const char *path)
+{
+	if (!validate_ptr(session))
+		return -1;
+	if (g_log_fd < 0)
+		return 0;
+	if (!assert_ok(session->buffer_len <= MAX_FILE_BYTES))
+		return -1;
+	if (!assert_ok(session->buffer[session->buffer_len] == '\0'))
+		return -1;
+
+	u32 ck = cksum_bytes((const unsigned char *)session->buffer,
+			     session->buffer_len);
+
+	char safe_path[192];
+	size_t have_path = sanitize_path(path, safe_path, sizeof(safe_path));
+
+	char msg[256];
+	int rc = 0;
+	if (have_path) {
+		rc = snprintf(msg, sizeof(msg), "cksum=%u len=%zu path=%s", ck,
+			      session->buffer_len, safe_path);
+	} else {
+		rc = snprintf(msg, sizeof(msg), "cksum=%u len=%zu", ck,
+			      session->buffer_len);
+	}
+	if (rc < 0 || (size_t)rc >= sizeof(msg))
+		return -1;
+	return log_write("file", msg);
 }
 
 int log_open(const struct Session *session)
