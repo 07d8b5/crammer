@@ -269,7 +269,10 @@ static int advance_prompt(
 
     if (rc != 0)
       return -1;
-    rc = rng_shuffle_items(c->rng, c->item_order, count);
+    struct Rng* rng = c->rng;
+    size_t* item_order = c->item_order;
+
+    rc = rng_shuffle_items(rng, item_order, count);
     if (rc != 0)
       return -1;
     rt->item_pos = 0;
@@ -282,7 +285,9 @@ static int advance_prompt(
   } else {
     rt->item_pos++;
     if (rt->item_pos >= count) {
-      int rc = rng_shuffle_items(c->rng, c->item_order, count);
+      struct Rng* rng = c->rng;
+      size_t* item_order = c->item_order;
+      int rc = rng_shuffle_items(rng, item_order, count);
       if (rc != 0)
         return -1;
       rt->item_pos = 0;
@@ -500,7 +505,10 @@ static int init_runtime(const struct ctx* c, struct runtime* rt) {
     return -1;
   if (!assert_ok(count <= MAX_ITEMS_PER_GROUP))
     return -1;
-  rc = rng_shuffle_items(c->rng, c->item_order, count);
+  struct Rng* item_rng = c->rng;
+  size_t* item_order = c->item_order;
+
+  rc = rng_shuffle_items(item_rng, item_order, count);
   if (rc != 0)
     return -1;
   rc = select_next_item(c, rt);
