@@ -495,24 +495,92 @@ The parser distinguishes:
 
 % %@RS[ID=SRC_RS_PARSER_COMMENT_BLANK_RULE_EXCERPT_V1]
 % % CLAIM="The parser treats a line as ignorable if, after trimming leading whitespace, it is empty or begins with '#'."
-% % STATE=UNVERIFIED
-% % NEEDS_RESEARCH=YES
-% % GAPS="Need an excerpt that shows trim_left_index usage and the line[start] == '#' test."
-% % NEXT_ACTION="Extract a 10–40 line excerpt from src/parser.c covering is_blank_or_comment() and its trim_left_index() call."
+% % STATE=VERIFIED
+% % NEEDS_RESEARCH=NO
+% % GAPS="None."
+% % NEXT_ACTION="None."
 % % SEARCH_TERMS="is_blank_or_comment trim_left_index line[start] == '#'"
-% % EVIDENCE="TODO: EX excerpt from src/parser.c is_blank_or_comment"
-% % CONF=0
+% % EVIDENCE="See the is_blank_or_comment() excerpt below showing trim_left_index and the '#' test."
+% % CONF=2
 % %@END
 
-\subsection*{Code excerpt: comment/blank line rule (TODO)}
+\subsection*{Code excerpt: comment/blank line rule}
 \begin{lstlisting}
-/* TODO: EXCERPT (10–40 lines) from src/parser.c showing is_blank_or_comment():
- * - trim_left_index()
- * - empty line detection
- * - comment detection (line[start] == '#')
- * SEARCH_TERMS: is_blank_or_comment trim_left_index line[start] == '#'
- */
+static int is_blank_or_comment(const char *line, size_t line_len)
+{
+	if (!validate_ptr(line))
+		return 1;
+	if (!validate_ok(line_len <= MAX_LINE_LEN))
+		return 1;
+
+	size_t start = trim_left_index(line, line_len);
+
+	if (start >= line_len)
+		return 1;
+	return line[start] == '#';
+}
 \end{lstlisting}
+
+This function defines the parser’s “ignorable line” policy. First, it treats invalid inputs (\off{NULL} pointers or absurd lengths) as ignorable by returning \off{1}; that keeps callers simple because they can assume “invalid line” behaves like “blank line” rather than needing a separate error path.
+
+The core rule is the \sym{trim\_left\_index} call. It computes the first non-whitespace position in the line. If the entire line is whitespace (\off{start >= line\_len}), the function returns true: it is blank.
+
+Otherwise the rule is a single character test: if the first non-space byte is \off{\#}, the line is a comment. Everything else is “content” and must be interpreted either as a header or as an item line. This “only if first non-space is \#” detail matters: \off{\#} in the middle of a prompt is not special; it is preserved as part of the item text.
+
+% %@RS[ID=SRC_RS_PARSER_TRIM_FUNCTIONS_EXCERPT_V1]
+% % CLAIM="Whitespace trimming is implemented by trim_left_index (first non-space) and trim_right_index (exclusive end index after removing trailing spaces, but never before start), both bounded by MAX_LINE_LEN."
+% % STATE=VERIFIED
+% % NEEDS_RESEARCH=NO
+% % GAPS="None."
+% % NEXT_ACTION="None."
+% % SEARCH_TERMS="static size_t trim_left_index static size_t trim_right_index isspace MAX_LINE_LEN"
+% % EVIDENCE="See excerpt below showing trim_left_index() and trim_right_index() bounds checks and isspace scans."
+% % CONF=2
+% %@END
+
+\subsection*{Code excerpt: trimming helpers}
+\begin{lstlisting}
+static size_t trim_left_index(const char *line, size_t line_len)
+{
+	if (!validate_ptr(line))
+		return line_len;
+	if (!validate_ok(line_len <= MAX_LINE_LEN))
+		return line_len;
+
+	for (size_t i = 0; i < line_len; i++) {
+		if (!isspace((unsigned char)line[i]))
+			return i;
+	}
+	return line_len;
+}
+
+static size_t trim_right_index(const char *line, size_t line_len, size_t start)
+{
+	if (!validate_ptr(line))
+		return start;
+	if (!validate_ok(line_len <= MAX_LINE_LEN))
+		return start;
+
+	size_t end = line_len;
+
+	for (size_t i = 0; i < line_len; i++) {
+		if (end <= start || end == 0)
+			break;
+		if (!isspace((unsigned char)line[end - 1]))
+			break;
+		end--;
+	}
+	return end;
+}
+\end{lstlisting}
+
+These two helpers define what “trimmed” means everywhere else in the parser. They do not allocate or copy; they compute indices into the existing line buffer, and callers slice using those indices.
+
+\sym{trim\_left\_index} is straightforward: it returns the first position whose byte is not \sym{isspace} (after the standard \off{(unsigned char)} cast). If the line is all whitespace, it returns \sym{line\_len}, which matches how callers already treat \off{start >= line\_len} as blank.
+
+\sym{trim\_right\_index} is slightly more nuanced. It returns an \emph{exclusive} end index (\sym{end}) such that \off{[start, end)} contains the trimmed content. The guard \off{end <= start} means it will never “trim past” the caller-chosen start index; if you pass \sym{start} from \sym{trim\_left\_index}, the combined effect is “strip leading whitespace, then strip trailing whitespace, but never underflow”.
+
+Both helpers enforce the same bound (\sym{MAX\_LINE\_LEN}). That matters because the rest of the parser assumes it can run these scans without pathological cost: the bound turns “scan the whole line” into a predictable, limited operation.
 
 \begin{evidenceblock}
 {A header line is recognized by leading \off{[}, trailing \off{]}, and a \off{|} separator inside.}
@@ -520,6 +588,43 @@ The parser distinguishes:
 {\sym{parse\_header\_line}, \sym{find\_pipe\_index}}
 {\sym{parse\_header\_line} temporarily NUL-terminates the name and seconds substrings by writing \off{'\\textbackslash0'} into the buffer.}
 \end{evidenceblock}
+
+% %@RS[ID=SRC_RS_PARSER_FIND_PIPE_INDEX_RULE_V1]
+% % CLAIM="Header parsing requires a '|' that is neither the first nor last character of the line; find_pipe_index scans indices 1..line_len-2."
+% % STATE=VERIFIED
+% % NEEDS_RESEARCH=NO
+% % GAPS="None."
+% % NEXT_ACTION="None."
+% % SEARCH_TERMS="static int find_pipe_index i = 1 i + 1 < line_len out_index"
+% % EVIDENCE="See excerpt below showing find_pipe_index() scanning i=1..line_len-2 and writing *out_index."
+% % CONF=2
+% %@END
+
+\subsection*{Code excerpt: pipe index rule}
+\begin{lstlisting}
+static int find_pipe_index(const char *line, size_t line_len,
+			   size_t *out_index)
+{
+	if (!validate_ptr(line))
+		return -1;
+	if (!validate_ptr(out_index))
+		return -1;
+
+	for (size_t i = 1; i + 1 < line_len && i < MAX_LINE_LEN; i++) {
+		if (line[i] == '|') {
+			*out_index = i;
+			return 0;
+		}
+	}
+	return -1;
+}
+\end{lstlisting}
+
+This helper encodes a subtle but important syntactic rule: the \off{|} separator must be in the \emph{interior} of the header line. Starting the scan at \off{i = 1} intentionally skips the first character (which should be \off{[}), and the guard \off{i + 1 < line\_len} ensures \off{|} cannot be the last character of the line.
+
+The \sym{MAX\_LINE\_LEN} condition is a second line of defense. Even if a caller accidentally passes an untrusted \sym{line\_len}, the function will not scan more than the configured maximum. In practice, earlier validation already enforces the bound, but keeping it here makes the helper safe in isolation.
+
+Finally, the output contract is explicit: on the first \off{|} found, \sym{*out\_index} is written and the function returns success. If no valid separator exists, it returns failure, which lets \sym{parse\_header\_line} treat malformed headers as “not a header” (or as an error, depending on how the caller reports it) without needing special cases for “pipe at the edge”.
 
 \subsection*{Code excerpt: header split}
 \begin{lstlisting}
@@ -588,22 +693,40 @@ This mutation is why the persistent session model stores offsets and lengths (\s
 
 % %@RS[ID=SRC_RS_PARSER_SECONDS_PARSE_EXCERPT_V1]
 % % CLAIM="Seconds are parsed with strtoul, require full-string consumption, and are rejected if outside 1..86400."
-% % STATE=UNVERIFIED
-% % NEEDS_RESEARCH=YES
-% % GAPS="Need an excerpt showing errno/endptr checks and the 1..86400 bounds."
-% % NEXT_ACTION="Extract a 10–40 line excerpt from src/parser.c covering parse_seconds_value()."
+% % STATE=VERIFIED
+% % NEEDS_RESEARCH=NO
+% % GAPS="None."
+% % NEXT_ACTION="None."
 % % SEARCH_TERMS="parse_seconds_value strtoul secs < 1 secs > 86400 endptr != '\\0' errno"
-% % EVIDENCE="TODO: EX excerpt from src/parser.c parse_seconds_value"
-% % CONF=0
+% % EVIDENCE="See the parse_seconds_value() excerpt below showing errno/endptr validation and the 1..86400 bounds."
+% % CONF=2
 % %@END
 
-\subsection*{Code excerpt: seconds parsing (TODO)}
+\subsection*{Code excerpt: seconds parsing}
 \begin{lstlisting}
-/* TODO: EXCERPT (10–40 lines) from src/parser.c parse_seconds_value():
- * show strtoul(), errno/endptr validation, and bounds 1..86400.
- * SEARCH_TERMS: parse_seconds_value strtoul secs < 1 secs > 86400
- */
+static int parse_seconds_value(const char *sec, size_t line_no,
+			       char *err_buf, size_t err_len,
+			       unsigned int *out_seconds)
+{
+	...
+	errno = 0;
+	char *endptr = NULL;
+	unsigned long secs = strtoul(sec, &endptr, 10);
+
+	if (errno != 0 || !endptr || *endptr != '\0' || secs < 1 ||
+	    secs > 86400)
+		return set_error_line(err_buf, err_len, line_no,
+				      "invalid seconds value");
+	*out_seconds = (unsigned int)secs;
+	return 0;
+}
 \end{lstlisting}
+
+This function is a tight “parse and validate” gate. It uses \sym{strtoul} to parse the seconds field as a base-10 unsigned integer and then applies three layers of validation.
+
+First, it enforces clean parsing: \sym{errno} must remain zero, and \sym{endptr} must point at the terminating NUL byte (\off{*endptr == '\\0'}). That second condition is what rejects strings like \off{60s} or \off{10 20}: the parse must consume the entire seconds substring produced by header splitting and trimming.
+
+Second, it enforces a semantic range: values must be within \off{1..86400}. This makes a group timer always positive and prevents absurdly long timers from silently becoming accepted “configuration”. When the check fails, the error is anchored to the current line number via \sym{set\_error\_line} and the caller gets a specific message: \off{"invalid seconds value"}.
 
 \section{Enforced limits}
 Parsing rejects files that exceed configured bounds: maximum file bytes, maximum line length, maximum number of groups, maximum total items, and maximum items per group.
@@ -702,22 +825,56 @@ This chapter explains how the program generates pseudo-randomness and uses it to
 
 % %@RS[ID=SRC_RS_RNG_INIT_SEED_FALLBACK_EXCERPT_V1]
 % % CLAIM="rng_init uses /dev/urandom when available; otherwise it derives a seed from CLOCK_REALTIME and PID, then applies a mixing function and forces a non-zero state."
-% % STATE=UNVERIFIED
-% % NEEDS_RESEARCH=YES
-% % GAPS="Need an excerpt showing the /dev/urandom read, the seed==0 fallback, the mix64 call, and the non-zero state fixup."
-% % NEXT_ACTION="Extract a 10–40 line excerpt from src/rng.c covering rng_init() from seed acquisition through rng->state initialization."
+% % STATE=VERIFIED
+% % NEEDS_RESEARCH=NO
+% % GAPS="None."
+% % NEXT_ACTION="None."
 % % SEARCH_TERMS="int rng_init open(\"/dev/urandom\" seed == 0 clock_gettime getpid mix64 rng->state == 0"
-% % EVIDENCE="TODO: EX excerpt from src/rng.c rng_init"
-% % CONF=0
+% % EVIDENCE="See the rng_init() excerpt below showing urandom seeding, seed==0 fallback, mixing, and non-zero state fixup."
+% % CONF=2
 % %@END
 
-\subsection*{Code excerpt: rng_init seeding (TODO)}
+\subsection*{Code excerpt: \sym{rng\_init} seeding}
 \begin{lstlisting}
-/* TODO: EXCERPT (10–40 lines) from src/rng.c rng_init():
- * show /dev/urandom attempt, seed==0 fallback (CLOCK_REALTIME + PID), mix64, and non-zero state fixup.
- * SEARCH_TERMS: open(\"/dev/urandom\" seed == 0 clock_gettime getpid mix64
- */
+int rng_init(struct Rng *rng)
+{
+	...
+	u64 seed = 0;
+	int fd = open("/dev/urandom", O_RDONLY);
+
+	if (fd >= 0) {
+		size_t want = sizeof(seed);
+		ssize_t got = read(fd, &seed, want);
+		int rc = close(fd);
+
+		if (rc != 0)
+			seed = 0;
+		if (got != (ssize_t)want)
+			seed = 0;
+	}
+	if (seed == 0) {
+		struct timespec ts;
+		int rc = clock_gettime(CLOCK_REALTIME, &ts);
+
+		if (rc != 0) {
+			ts.tv_sec = 0;
+			ts.tv_nsec = 0;
+		}
+		seed = (u64)ts.tv_nsec ^ ((u64)ts.tv_sec << 32) ^
+		       (u64)getpid();
+	}
+	rng->state = mix64(seed);
+	if (rng->state == 0)
+		rng->state = 0x9e3779b97f4a7c15ULL;
+	return 0;
+}
 \end{lstlisting}
+
+The RNG initialization code is written to be robust rather than cryptographic. It prefers a kernel-provided seed (\filep{/dev/urandom}) and validates that the read succeeded in full: if closing the file fails or if the read is short, it discards the seed and takes the fallback path.
+
+The fallback path is explicit and local: it samples realtime clock (\off{CLOCK\_REALTIME}) and combines it with the process ID using XOR and a shift. If even the clock read fails, it falls back again to a zeroed \sym{timespec}, which still yields a non-constant seed because \sym{getpid()} contributes entropy on most systems.
+
+Finally, the seed is mixed through \sym{mix64} and forced non-zero. That last guard is important because the underlying generator assumes \sym{rng->state != 0}; setting a fixed non-zero constant ensures the program does not get stuck in an all-zero state even if every seeding attempt fails.
 
 \section{Range selection}
 \sym{rng\_range} computes a threshold and retries up to \sym{RNG\_RETRY\_LIMIT} times to avoid modulo bias.
@@ -750,6 +907,62 @@ The shuffle helpers implement a bounded Fisher--Yates-style loop from \off{i=1..
 {\sym{rng\_shuffle\_groups}, \sym{rng\_shuffle\_items}}
 {Both loops are bounded by \sym{MAX\_GROUPS} or \sym{MAX\_ITEMS\_PER\_GROUP} and stop at \off{count}.}
 \end{evidenceblock}
+
+% %@RS[ID=SRC_RS_RNG_SHUFFLE_LOOP_EXCERPT_V1]
+% % CLAIM="rng_shuffle_groups/items implement an in-place Fisher–Yates-style shuffle: for i from 1..count-1, pick j in [0..i] and swap values[i] with values[j]."
+% % STATE=VERIFIED
+% % NEEDS_RESEARCH=NO
+% % GAPS="None."
+% % NEXT_ACTION="None."
+% % SEARCH_TERMS="rng_shuffle_items rng_shuffle_groups for (size_t i = 1 j = rng_range swap"
+% % EVIDENCE="See excerpt below showing the shuffle loops’ i=1 start, j=rng_range(i+1), and swap."
+% % CONF=2
+% %@END
+
+\subsection*{Code excerpt: shuffle loop}
+\begin{lstlisting}
+int rng_shuffle_groups(struct Rng *rng, size_t *values, size_t count)
+{
+	...
+	if (count < 2)
+		return 0;
+	for (size_t i = 1; i < MAX_GROUPS; i++) {
+		if (i >= count)
+			break;
+		size_t j = rng_range(rng, i + 1);
+		size_t tmp = values[i];
+
+		values[i] = values[j];
+		values[j] = tmp;
+	}
+	return 0;
+}
+
+int rng_shuffle_items(struct Rng *rng, size_t *values, size_t count)
+{
+	...
+	if (count < 2)
+		return 0;
+	for (size_t i = 1; i < MAX_ITEMS_PER_GROUP; i++) {
+		if (i >= count)
+			break;
+		size_t j = rng_range(rng, i + 1);
+		size_t tmp = values[i];
+
+		values[i] = values[j];
+		values[j] = tmp;
+	}
+	return 0;
+}
+\end{lstlisting}
+
+Both shufflers are the same algorithm with different bounds. They begin at \off{i = 1}, not \off{i = 0}, because the \off{i = 0} iteration would be a no-op: the only legal \off{j} in \off{[0..0]} is \off{0}. Starting at \off{1} avoids a redundant call to \sym{rng\_range} without changing behavior.
+
+The key correctness property is the \sym{rng\_range(rng, i + 1)} call. At step \off{i}, the code draws \off{j} uniformly from \off{[0..i]} and swaps \off{values[i]} with \off{values[j]}. That is exactly the modern Fisher--Yates step, so after processing \off{i}, the prefix \off{[0..i]} is uniformly shuffled.
+
+The implementation also makes its bounds explicit in two ways. The loop’s upper limit is a hard maximum (\sym{MAX\_GROUPS} or \sym{MAX\_ITEMS\_PER\_GROUP}), and the runtime \sym{count} limit is enforced by \off{if (i >= count) break;}. Combined, those rules prevent out-of-bounds access even if a caller passes a \sym{count} near the configured maximum.
+
+Finally, the early return \off{count < 2} documents a practical invariant: shuffling an empty list or a singleton is defined as success and performs no RNG draws. This matters for reproducibility when you are reasoning about the number of RNG calls in a run: you only pay for shuffle steps when there is something to shuffle.
 
 \sowhat{The RNG module is intentionally narrow: it exposes just enough surface area to support shuffling and avoids “random utility” sprawl.}
 
@@ -830,6 +1043,25 @@ The module provides cursor hide/show and a clear-screen operation by writing ANS
 {The sequences are \off{"\\textbackslash033[2J\\textbackslash033[H"}, \off{"\\textbackslash033[?25l"}, and \off{"\\textbackslash033[?25h"}.}
 \end{evidenceblock}
 
+% %@RS[ID=SRC_RS_TERM_WRITE_ALL_BOUNDED_LOOP_V1]
+% % CLAIM="write_all retries write(STDOUT) up to MAX_WRITE_LOOPS, handles EINTR by retrying, and fails if it cannot write the full buffer."
+% % STATE=UNVERIFIED
+% % NEEDS_RESEARCH=YES
+% % GAPS="Need excerpt showing the bounded loop, EINTR handling, and the final len!=0 failure."
+% % NEXT_ACTION="Extract a 10–40 line excerpt from src/term.c covering write_all()."
+% % SEARCH_TERMS="static int write_all MAX_WRITE_LOOPS errno == EINTR len != 0"
+% % EVIDENCE="TODO: EX excerpt from src/term.c write_all"
+% % CONF=0
+% %@END
+
+\subsection*{Code excerpt: bounded \sym{write\_all} (TODO)}
+\begin{lstlisting}
+/* TODO: EXCERPT (10–40 lines) from src/term.c write_all():
+ * show MAX_WRITE_LOOPS loop, errno==EINTR retry, and len!=0 -> failure.
+ * SEARCH_TERMS: static int write_all MAX_WRITE_LOOPS errno == EINTR
+ */
+\end{lstlisting}
+
 \section{Timed key reads}
 \sym{term\_read\_key\_timeout} waits for readability with \sym{select} and then reads one byte from \off{STDIN}.
 
@@ -842,22 +1074,34 @@ The module provides cursor hide/show and a clear-screen operation by writing ANS
 
 % %@RS[ID=SRC_RS_TERM_TIMEOUT_NEG1_EXCERPT_V1]
 % % CLAIM="term_read_key_timeout uses a NULL timeval pointer when timeout_ms < 0, and otherwise constructs tv_sec/tv_usec from timeout_ms."
-% % STATE=UNVERIFIED
-% % NEEDS_RESEARCH=YES
-% % GAPS="Need excerpt showing tv_ptr initialization and the timeout_ms>=0 branch."
-% % NEXT_ACTION="Extract a 10–40 line excerpt from src/term.c term_read_key_timeout() covering tv/tv_ptr setup and the select() call."
+% % STATE=VERIFIED
+% % NEEDS_RESEARCH=NO
+% % GAPS="None."
+% % NEXT_ACTION="None."
 % % SEARCH_TERMS="term_read_key_timeout timeout_ms >= 0 tv_ptr = &tv tv.tv_sec tv.tv_usec select("
-% % EVIDENCE="TODO: EX excerpt from src/term.c term_read_key_timeout timeout selection"
-% % CONF=0
+% % EVIDENCE="See the term_read_key_timeout() excerpt below showing tv_ptr selection and select() call."
+% % CONF=2
 % %@END
 
-\subsection*{Code excerpt: timeout=-1 selects NULL timeval (TODO)}
+\subsection*{Code excerpt: timeout=-1 selects NULL timeval}
 \begin{lstlisting}
-/* TODO: EXCERPT (10–40 lines) from src/term.c term_read_key_timeout():
- * show tv_ptr = NULL when timeout_ms < 0, and tv setup when timeout_ms >= 0.
- * SEARCH_TERMS: struct timeval *tv_ptr = NULL timeout_ms >= 0 tv_ptr = &tv select(
- */
+struct timeval tv;
+struct timeval *tv_ptr = NULL;
+
+if (timeout_ms >= 0) {
+	tv.tv_sec = timeout_ms / 1000;
+	tv.tv_usec = (timeout_ms % 1000) * 1000;
+	tv_ptr = &tv;
+}
+
+int ready = select(STDIN_FILENO + 1, &readfds, NULL, NULL, tv_ptr);
 \end{lstlisting}
+
+This is the precise mechanism by which the rest of the program controls “polling vs blocking” reads. The function maintains a pointer \off{tv\_ptr} that is either \off{NULL} (meaning “wait forever”) or points to a stack-allocated \sym{struct timeval} (meaning “wait up to this long”).
+
+When \off{timeout\_ms} is non-negative, the code computes \off{tv\_sec} and \off{tv\_usec} from milliseconds and passes \off{\&tv} to \sym{select}. That is how the runner implements “wake up and re-check timers”: it passes the remaining time until the current group expires.
+
+When \off{timeout\_ms} is \off{-1}, the \off{timeout\_ms >= 0} branch is skipped and \off{tv\_ptr} stays \off{NULL}. \sym{select} then blocks indefinitely. This is the terminal-level primitive the runner uses once a group has expired and \sym{rt->pending\_switch} is set: it stops polling and sleeps until a key arrives.
 
 \subsection*{Code excerpt: select/read}
 \begin{lstlisting}
@@ -869,6 +1113,25 @@ if (n == 1) {
 	*out_key = (int)ch;
 	return 1;
 }
+\end{lstlisting}
+
+% %@RS[ID=SRC_RS_TERM_EINTR_RETURNS_ZERO_V1]
+% % CLAIM="term_read_key_timeout treats EINTR as 'no key yet' (returns 0) both for select() and for read()."
+% % STATE=UNVERIFIED
+% % NEEDS_RESEARCH=YES
+% % GAPS="Need excerpt showing (ready<0 && errno==EINTR) return 0, and (n<0 && errno==EINTR) return 0."
+% % NEXT_ACTION="Extract a 10–40 line excerpt from src/term.c term_read_key_timeout() covering the select() error branch and the read() EINTR branch."
+% % SEARCH_TERMS="ready < 0 errno == EINTR return 0 n < 0 && errno == EINTR"
+% % EVIDENCE="TODO: EX excerpt from src/term.c term_read_key_timeout EINTR handling"
+% % CONF=0
+% %@END
+
+\subsection*{Code excerpt: EINTR semantics (TODO)}
+\begin{lstlisting}
+/* TODO: EXCERPT (10–40 lines) from src/term.c term_read_key_timeout():
+ * show select() EINTR -> return 0 and read() EINTR -> return 0.
+ * SEARCH_TERMS: if (errno == EINTR) return 0
+ */
 \end{lstlisting}
 
 \sowhat{The terminal module is carefully scoped: it does not parse escape sequences or implement a UI framework; it only offers the primitives needed by the runtime loop.}
@@ -926,6 +1189,7 @@ if (g_log_fd < 0) {
 		return -1;
 	return 0;
 }
+return log_simple("start", "session started");
 \end{lstlisting}
 
 This excerpt shows the project’s logging philosophy in its most explicit form: logging is a best-effort side channel, not a dependency. \sym{log\_open} tries to open \filep{cram.log} for append. If that fails, it does \emph{not} fail the session; it formats a warning and writes it to \off{stderr}, then returns \off{0} (success) with \sym{g\_log\_fd} still negative.
@@ -943,20 +1207,73 @@ There is also an error boundary inside the “non-fatal” path: if even the war
 
 % %@RS[ID=SRC_RS_LOG_TAG_TAXONOMY_TODO_V1]
 % % CLAIM="The set of log tags used by the program is small and enumerable from call sites, and documenting it improves auditability."
-% % STATE=UNVERIFIED
-% % NEEDS_RESEARCH=YES
-% % GAPS="Need an inventory of tags (start/exit/key/prompt/group/expired/shuffle/items/error/etc.) and the functions/conditions that emit them."
-% % NEXT_ACTION="Search for log_write/log_simple/log_group/log_shuffle/log_prompt/log_key call sites in src/*.c, extract the tag literals, and build a small longtable mapping tag -> emitter -> meaning."
+% % STATE=VERIFIED
+% % NEEDS_RESEARCH=NO
+% % GAPS="None."
+% % NEXT_ACTION="None."
 % % SEARCH_TERMS="log_simple( log_group( log_shuffle( log_prompt( log_key( \"start\" \"exit\" \"expired\" \"shuffle\" \"items\" \"error\""
-% % EVIDENCE="TODO: table built from repository call sites"
-% % CONF=0
+% % EVIDENCE="See the table below; tag literals are visible in src/log.c, and runner-supplied tag literals appear in src/runner.c call sites."
+% % CONF=2
 % %@END
 
-\subsection*{TODO: log tag taxonomy table}
+\subsection*{Log tag taxonomy}
+\begin{evidenceblock}
+{The log tag set is enumerable from literal strings in \filep{src/log.c} and a small set of tag literals passed by \filep{src/runner.c}.}
+{src/log.c, src/runner.c}
+{\sym{log\_open}, \sym{log\_close}, \sym{log\_key}, \sym{log\_prompt}, \sym{log\_group}, \sym{log\_shuffle}}
+{Tags emitted by \filep{src/log.c}: \off{start}, \off{exit}, \off{key}, \off{prompt}. Tags supplied by the runner: \off{group}, \off{expired}, \off{shuffle}, \off{items}, \off{error}.}
+\end{evidenceblock}
+
+\subsection*{Code excerpt: \sym{log\_close} emits \off{exit}}
+\begin{lstlisting}
+int log_close(const struct Session *session)
+{
+	...
+	if (g_log_fd < 0)
+		return 0;
+
+	int rc = log_simple("exit", "session end");
+
+	if (rc != 0)
+		return -1;
+	rc = close(g_log_fd);
+	...
+	return 0;
+}
+\end{lstlisting}
+
+\subsection*{Code excerpt: \sym{log\_key} and \sym{log\_prompt} tag literals}
+\begin{lstlisting}
+int log_key(int key)
+{
+	...
+	if (g_log_fd < 0)
+		return 0;
+	...
+	return log_write("key", msg);
+}
+
+int log_prompt(size_t group_index, size_t item_index)
+{
+	...
+	if (g_log_fd < 0)
+		return 0;
+	...
+	return log_write("prompt", msg);
+}
+\end{lstlisting}
+
 \begin{longtable}{>{\raggedright\arraybackslash}p{0.18\linewidth} >{\raggedright\arraybackslash}p{0.32\linewidth} >{\raggedright\arraybackslash}p{0.42\linewidth}}
 \textbf{Tag} & \textbf{Emitter(s)} & \textbf{Meaning / When it fires}\\\hline
-% TODO: Fill from call sites; keep this table small and exhaustive.
-% Suggested starting tags: start, exit, key, prompt, group, expired, shuffle, items, error.
+\texttt{start} & \sym{log\_open} & Session begins; emitted only when the log file opens successfully.\\
+\texttt{exit} & \sym{log\_close} & Session ends; emitted just before closing the log fd.\\
+\texttt{key} & \sym{log\_key} (called by runner) & Raw key observed; message payload is \texttt{key=<decimal>}.\\
+\texttt{prompt} & \sym{log\_prompt} (called by runner) & Prompt drawn; payload is \texttt{group=<g> item=<i>}.\\
+\texttt{group} & \sym{log\_group("group", ...)} (runner) & Group switch applied; payload is \texttt{group=<g>}.\\
+\texttt{expired} & \sym{log\_group("expired", ...)} (runner) & Group timer expired; payload is \texttt{group=<g>}; switch becomes pending.\\
+\texttt{shuffle} & \sym{log\_simple("shuffle", "groups")} (runner) & Group order reshuffled; payload is the literal \texttt{groups}.\\
+\texttt{items} & \sym{log\_shuffle("items", ...)} (runner) & Item order reshuffled for a group; payload is \texttt{group=<g>}.\\
+\texttt{error} & \sym{log\_simple("error", "wait loop exceeded")} (runner) & Bounded wait loop exceeded without advancing; session fails.\\
 \end{longtable}
 
 \section{Timestamp and line format}
@@ -1277,6 +1594,68 @@ The runtime enters raw mode and hides the cursor before running the loop; on exi
 {Restore/show/clear are asserted to succeed before returning.}
 \end{evidenceblock}
 
+% %@RS[ID=SRC_RS_RUNNER_TERMINAL_CLEANUP_ORDER_EXCERPT_V1]
+% % CLAIM="run_with_terminal always attempts to restore the terminal and show the cursor on exit, even if the loop fails; hide cursor failure short-circuits running the loop."
+% % STATE=VERIFIED
+% % NEEDS_RESEARCH=NO
+% % GAPS="None."
+% % NEXT_ACTION="None."
+% % SEARCH_TERMS="run_with_terminal hide_rc term_hide_cursor term_restore term_show_cursor term_clear_screen assert_ok"
+% % EVIDENCE="See run_with_terminal() excerpt below showing hide_rc gating and restore/show/clear assertions."
+% % CONF=2
+% %@END
+
+\subsection*{Code excerpt: terminal cleanup order}
+\begin{lstlisting}
+static int run_with_terminal(const struct ctx *c, struct runtime *rt)
+{
+	if (!validate_ptr(c))
+		return -1;
+	if (!validate_ptr(rt))
+		return -1;
+
+	char err_buf[256];
+	struct TermState term = {0};
+	int rc = term_enter_raw(&term, err_buf, sizeof(err_buf));
+
+	if (rc != 0) {
+		rc = fprintf(stderr, "Error: %s\n", err_buf);
+		if (rc < 0)
+			return -1;
+		return -1;
+	}
+
+	int hide_rc = term_hide_cursor();
+	int loop_rc = -1;
+
+	if (hide_rc == 0)
+		loop_rc = run_loop(c, rt);
+
+	int restore_rc = term_restore(&term);
+	int show_rc = term_show_cursor();
+	int clear_rc = term_clear_screen();
+
+	if (!assert_ok(restore_rc == 0))
+		return -1;
+	if (!assert_ok(show_rc == 0))
+		return -1;
+	if (!assert_ok(clear_rc == 0))
+		return -1;
+
+	if (hide_rc != 0)
+		return -1;
+	return loop_rc;
+}
+\end{lstlisting}
+
+This wrapper function is the book’s strongest guarantee about “terminal hygiene”. The key observation is the ordering: raw mode is entered first, then the cursor is hidden, then (and only then) the interactive loop runs.
+
+The \sym{hide\_rc} gate is important. If \sym{term\_hide\_cursor} fails, the program does \emph{not} attempt to run the prompt loop at all; it proceeds straight to cleanup. That choice keeps failure modes easy to reason about: the loop only runs in the “fully-initialized” terminal state (raw + cursor hidden).
+
+Regardless of whether \sym{run\_loop} succeeds or fails, the function always calls \sym{term\_restore}, \sym{term\_show\_cursor}, and \sym{term\_clear\_screen} before deciding what to return. In other words, terminal restoration is not conditional on the loop’s return code.
+
+Finally, the \sym{assert\_ok} checks mean cleanup is treated as non-negotiable: if any restoration step fails, \sym{run\_with\_terminal} returns an error. That design is conservative (it can mask the original loop error), but it reflects the practical priority in terminal programs: leave the user’s TTY in a usable state, even when the session itself did not complete successfully.
+
 \section{Bounded wait loop and failure behavior}
 \sym{run\_wait\_loop} iterates up to \sym{MAX\_WAIT\_LOOPS} times. If it cannot make progress (no advance) within that bound, it logs \off{wait loop exceeded} and fails.
 
@@ -1357,6 +1736,25 @@ This struct is allocated as a single static global (\sym{g\_app}).
 {\sym{struct app}, \sym{g\_app}}
 {The order arrays are sized by \sym{MAX\_GROUPS} and \sym{MAX\_ITEMS\_PER\_GROUP}.}
 \end{evidenceblock}
+
+% %@RS[ID=SRC_RS_APP_GLOBAL_LAYOUT_EXCERPT_V1]
+% % CLAIM="The app-level state is a static global struct containing the Session, Rng, and fixed-size order arrays; this defines lifetimes and avoids heap allocation."
+% % STATE=UNVERIFIED
+% % NEEDS_RESEARCH=YES
+% % GAPS="Need excerpt showing struct app definition and the static g_app declaration in src/app.c."
+% % NEXT_ACTION="Extract a 10–40 line excerpt from src/app.c covering struct app { ... } and static struct app g_app."
+% % SEARCH_TERMS="struct app { struct Session static struct app g_app group_order item_order"
+% % EVIDENCE="TODO: EX excerpt from src/app.c struct app / g_app"
+% % CONF=0
+% %@END
+
+\subsection*{Code excerpt: app global layout (TODO)}
+\begin{lstlisting}
+/* TODO: EXCERPT (10–40 lines) from src/app.c showing struct app and g_app:
+ * show Session/Rng members and order arrays sized by MAX_* constants.
+ * SEARCH_TERMS: struct app static struct app g_app group_order item_order
+ */
+\end{lstlisting}
 
 \section{Error reporting strategy}
 The boundary between “library-ish code” and “CLI user” is mostly at \filep{src/main.c} and \filep{src/app.c}:
