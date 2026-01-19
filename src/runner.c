@@ -215,7 +215,10 @@ static int update_group_timer(const struct ctx* c, struct runtime* rt) {
   if (!assert_ok(rt->group_index < c->session->group_count))
     return -1;
 
-  unsigned int seconds = c->session->groups[rt->group_index].seconds;
+  struct Session* session = c->session;
+  size_t group_index = rt->group_index;
+  const struct Group* group = &session->groups[group_index];
+  unsigned int seconds = group->seconds;
 
   if (!assert_ok(seconds > 0))
     return -1;
@@ -498,7 +501,7 @@ static int init_runtime(const struct ctx* c, struct runtime* rt) {
   return 0;
 }
 
-int runner_run(struct TermState* term,
+int runner_run(const struct TermState* term,
     struct Session* session,
     struct Rng* rng,
     size_t* group_order,

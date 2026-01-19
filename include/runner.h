@@ -8,7 +8,7 @@ struct Session;
 struct Rng;
 struct TermState;
 
-int runner_run(struct TermState* term,
+int runner_run(const struct TermState* term,
     struct Session* session,
     struct Rng* rng,
     size_t* group_order,
