@@ -271,7 +271,11 @@ static int handle_line(struct Session* session,
         session, line, line_len, state->line_no, err_buf, err_len);
     if (rc != 0)
       return -1;
-    state->current_group = session->group_count - 1;
+    size_t group_count = session->group_count;
+
+    if (!assert_ok(group_count > 0))
+      return -1;
+    state->current_group = group_count - 1;
     state->has_group = 1;
     return 0;
   }
