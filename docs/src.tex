@@ -1,0 +1,1408 @@
+\documentclass[11pt,oneside,openany]{book}
+\usepackage[margin=1in]{geometry}
+\usepackage{iftex}
+\ifPDFTeX
+	\usepackage[T1]{fontenc}
+\else
+	\usepackage{fontspec}
+	\setmainfont{Latin Modern Roman}
+	\setsansfont{Latin Modern Sans}
+	\setmonofont{Latin Modern Mono}
+\fi
+\usepackage{xurl}
+\usepackage{hyperref}
+\usepackage{xcolor}
+\usepackage{microtype}
+\usepackage{fancyhdr}
+\usepackage{listings}
+\usepackage{longtable}
+\usepackage{array}
+\usepackage{tocloft}
+
+\newif\ifdraft
+% Set to \drafttrue for an internal working draft (shows editor notes).
+\draftfalse
+\newcommand{\draftnote}[2]{%
+	\ifdraft
+	\par\smallskip
+	\noindent\begingroup\small\sloppy
+	\color{gray}
+	\textbf{DRAFT NOTE (#1):} #2%
+	\endgroup
+	\par\smallskip
+	\fi
+}
+
+\newenvironment{evidenceblock}[4]{%
+	\begin{quote}\small\sloppy
+		\textbf{Claim:} #1\\
+		\textbf{Source:} \path{#2}\\
+		\textbf{Symbol/Addr:} \path{#3}\\
+		\textbf{Notes:} #4\\
+	}{\end{quote}}
+
+\hypersetup{hidelinks}
+\urlstyle{same}
+\pdfstringdefDisableCommands{%
+	\def\path#1{#1}%
+	\def\filep#1{#1}%
+	\def\sym#1{#1}%
+	\def\off#1{#1}%
+}
+% Encourage line breaks in long \path/\url runs (paths, symbols, IDs).
+\Urlmuskip=0mu plus 2mu\relax
+\DeclareRobustCommand{\sym}[1]{\path{#1}}
+\DeclareRobustCommand{\filep}[1]{\path{#1}}
+\newcommand{\off}[1]{\texttt{#1}}
+\newcommand{\purpose}[1]{\par\noindent\textbf{Purpose.} #1\par}
+\newcommand{\sowhat}[1]{%
+	\par\smallskip
+	\noindent\textbf{So what?} #1\par
+	\smallskip
+}
+\newcommand{\definition}[2]{%
+	\begin{quote}\small\sloppy
+		\textbf{Definition (#1).} #2
+	\end{quote}
+}
+\newcommand{\pitfall}[2]{%
+	\begin{quote}\small\sloppy
+		\textbf{Pitfall (#1).} #2
+	\end{quote}
+}
+\newcommand{\chapterroadmap}[2]{%
+	\begin{quote}\small\sloppy
+		\textbf{Roadmap.} #1
+		\par\medskip
+		\textbf{You should leave this chapter able to:}
+		\begin{itemize}#2\end{itemize}
+	\end{quote}
+}
+
+\setcounter{secnumdepth}{3}
+\setcounter{tocdepth}{1}
+\raggedbottom
+\setlength{\emergencystretch}{3em}
+\setlength{\headheight}{14pt}
+
+%======================================================================
+% LISTINGS (CODE EXCERPTS)
+%======================================================================
+\lstdefinestyle{cramc}{%
+	language=C,
+	basicstyle=\ttfamily\small,
+	columns=fullflexible,
+	breaklines=true,
+	breakatwhitespace=false,
+	showstringspaces=false,
+	upquote=true,
+	frame=single,
+	rulecolor=\color{black!15},
+	keywordstyle=\color{black},
+	commentstyle=\color{black!60},
+	stringstyle=\color{black},
+	tabsize=8
+}
+\lstset{style=cramc}
+
+%======================================================================
+% PAGE STYLE
+%======================================================================
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\textit{cram}}
+\fancyhead[R]{\textit{\leftmark}}
+\fancyfoot[C]{\thepage}
+
+%======================================================================
+% DOCUMENT METADATA
+%======================================================================
+\title{\textbf{cram}\\\large Source Walkthrough (\filep{src/})}
+\author{Repository: \filep{crammer/} \quad Companion: \filep{docs/crammer.tex}}
+\date{\today}
+
+\begin{document}
+\frontmatter
+\maketitle
+\tableofcontents
+
+%======================================================================
+% PREFACE
+%======================================================================
+\chapter{Preface: what this document is}
+\purpose{Walk through every C translation unit in \filep{src/} and explain how the pieces fit together: structure, invariants, error handling, and the design constraints that shape the code.}
+
+This is a source-level guide. It does not try to restate the user manual; it tries to answer engineering questions:
+\begin{itemize}
+	\item Where is the program entry point and what does it call?
+	\item Where is state stored and what are its lifetimes?
+	\item Which invariants are enforced by construction vs by checking?
+	\item How do parsing, randomness, timing, terminal I/O, and logging compose?
+\end{itemize}
+
+\definition{Repository root}{Throughout this document, file paths are relative to the repository root directory \filep{crammer/}.}
+\definition{Module}{A single \off{.c} file in \filep{src/} and its corresponding \off{.h} file in \filep{include/}.}
+
+%======================================================================
+% CHAPTER 1
+%======================================================================
+\mainmatter
+\chapter{Orientation: how control flows through \filep{src/}}
+\chapterroadmap{
+This chapter gives you the high-level call graph and the responsibilities of each file.
+}{
+	\item Identify the entry point and sequencing.
+	\item Know where parsing ends and runtime begins.
+	\item Understand which modules own which side effects.
+}
+
+\section{The top-level call graph}
+At a coarse level the program is a pipeline:
+\begin{quote}\small\sloppy
+\filep{src/main.c} \(\rightarrow\) \sym{app\_run\_file} (\filep{src/app.c}) \(\rightarrow\)
+parse \(\rightarrow\) log open \(\rightarrow\) RNG init \(\rightarrow\) run loop \(\rightarrow\) log close.
+\end{quote}
+
+\begin{evidenceblock}
+{The CLI entry point delegates almost all work to \sym{app\_run\_file}.}
+{src/main.c, include/app.h}
+{\sym{main}, \sym{app\_run\_file}}
+{\filep{src/main.c} calls \sym{app\_run\_file(argv[1])} after validating arguments.}
+\end{evidenceblock}
+
+\subsection*{Code excerpt: entry point}
+\begin{lstlisting}
+int main(int argc, char **argv)
+{
+	...
+	if (argc != 2) {
+		int rc = print_usage(argv[0]);
+		return (rc == 0) ? 1 : 2;
+	}
+	return (app_run_file(argv[1]) == 0) ? 0 : 1;
+}
+\end{lstlisting}
+
+\begin{evidenceblock}
+{\sym{app\_run\_file} sequences parse \(\rightarrow\) log open \(\rightarrow\) RNG init \(\rightarrow\) runner \(\rightarrow\) log close.}
+{src/app.c}
+{\sym{app\_run\_file}}
+{This function is the “orchestrator”: it does not implement the runtime loop; it calls into other modules.}
+\end{evidenceblock}
+
+\subsection*{Code excerpt: orchestration}
+\begin{lstlisting}
+int app_run_file(const char *path)
+{
+	int rc = setup_session(path);
+	if (rc != 0)
+		return -1;
+	rc = log_open(&g_app.session);
+	if (rc != 0)
+		return -1;
+	rc = rng_init(&g_app.rng);
+	if (rc != 0)
+		return -1;
+	rc = runner_run(&g_app.session, &g_app.rng,
+			g_app.group_order, MAX_GROUPS,
+			g_app.item_order, MAX_ITEMS_PER_GROUP);
+	...
+	return 0;
+}
+\end{lstlisting}
+
+\section{Module map}
+\begin{longtable}{>{\raggedright\arraybackslash}p{0.22\linewidth} >{\raggedright\arraybackslash}p{0.70\linewidth}}
+\textbf{File} & \textbf{Responsibility}\\\hline
+\filep{src/main.c} & CLI argument handling; prints usage; calls \sym{app\_run\_file}.\\
+\filep{src/app.c} & Owns the long-lived static app state; sequences parse/log/RNG/runner.\\
+\filep{src/model.c} & Initializes \sym{struct Session}.\\
+\filep{src/parser.c} & Reads a session file into a buffer and parses it into groups/items.\\
+\filep{src/rng.c} & RNG state, seeding, unbiased range selection, shuffles.\\
+\filep{src/term.c} & Raw terminal entry/restore and timed single-byte key reads.\\
+\filep{src/log.c} & Append-only log file writing with timestamps and tags.\\
+\filep{src/runner.c} & The runtime loop: timers, group switching, prompt display, and key handling.\\
+\end{longtable}
+
+\sowhat{If you are debugging a behavior, start by classifying it: parse-time (parser/model) vs run-time (runner/term/rng/log) vs wiring (main/app).}
+
+%======================================================================
+% CHAPTER 2
+%======================================================================
+\chapter{Cross-cutting design constraints}
+\chapterroadmap{
+This chapter explains the non-negotiables: bounded memory, bounded loops, and the project’s “defensive C” conventions.
+}{
+	\item Recognize the compile-time bounds that shape all data structures.
+	\item Understand how asserts/validations are used in this codebase.
+	\item Spot the “no unbounded loops” pattern in I/O and runtime code.
+}
+
+\section{Compile-time bounds and static storage}
+The repository defines its “maximum universe” in \filep{include/config.h}. These constants determine:
+\begin{itemize}
+	\item Maximum number of groups and items stored in memory.
+	\item Maximum accepted file size and line length.
+	\item Maximum number of iterations for loops that could otherwise spin.
+\end{itemize}
+
+\begin{evidenceblock}
+{The core data structures are statically sized by compile-time constants such as \sym{MAX\_GROUPS}, \sym{MAX\_ITEMS\_TOTAL}, and \sym{MAX\_FILE\_BYTES}.}
+{include/config.h, include/model.h}
+{\sym{MAX\_GROUPS}, \sym{MAX\_ITEMS\_TOTAL}, \sym{MAX\_FILE\_BYTES}, \sym{struct Session}}
+{\filep{include/model.h} embeds the buffer/groups/items arrays directly in \sym{struct Session}.}
+\end{evidenceblock}
+
+\section{Validation vs assertion}
+\filep{include/config.h} provides tiny helpers that appear throughout the source:
+\begin{itemize}
+	\item \sym{validate\_ptr}/\sym{validate\_ok}: used for input checking and early returns.
+	\item \sym{assert\_ptr}/\sym{assert\_ok}: used as “should be true here” internal checks.
+\end{itemize}
+
+% %@RS[ID=SRC_RS_ASSERT_VALIDATE_SAME_IMPL_V1]
+% % CLAIM="The assertion helpers and validation helpers currently compile to identical behavior (no abort/logging), so they only communicate intent."
+% % STATE=VERIFIED
+% % NEEDS_RESEARCH=NO
+% % GAPS="None."
+% % NEXT_ACTION="None."
+% % SEARCH_TERMS="static inline int assert_ok static inline int validate_ok assert_ptr validate_ptr"
+% % EVIDENCE="See include/config.h excerpt below showing the helper bodies."
+% % CONF=2
+% %@END
+
+\begin{evidenceblock}
+{The code distinguishes “validation” helpers (\sym{validate\_...}) from “assertion” helpers (\sym{assert\_...}), and uses them broadly for control-flow checks.}
+{include/config.h}
+{\sym{validate\_ok}, \sym{validate\_ptr}, \sym{assert\_ok}, \sym{assert\_ptr}}
+{Both families currently compile to the same behavior (boolean checks); the distinction is semantic and shows intent.}
+\end{evidenceblock}
+
+\subsection*{Code excerpt: assert vs validate}
+\begin{lstlisting}
+static inline int assert_ok(int cond)
+{
+	return cond ? 1 : 0;
+}
+
+static inline int assert_ptr(const void *ptr)
+{
+	return ptr ? 1 : 0;
+}
+
+static inline int validate_ok(int cond)
+{
+	return cond ? 1 : 0;
+}
+
+static inline int validate_ptr(const void *ptr)
+{
+	return ptr ? 1 : 0;
+}
+\end{lstlisting}
+
+These four helpers are the codebase’s “micro-contract” language. The excerpt shows that \sym{assert\_ok}/\sym{assert\_ptr} and \sym{validate\_ok}/\sym{validate\_ptr} are currently identical at the machine level: they return \off{1} for true/non-null and \off{0} for false/null. There is no logging, abort, or side effect baked into either family.
+
+So why have two sets? The answer is intent. Calls written as \sym{validate\_...} are meant to guard external inputs and return early when the caller violated a precondition (e.g., \off{NULL} pointers or invalid ranges). Calls written as \sym{assert\_...} mark internal invariants: conditions the author believes should always hold at that point in the control flow.
+
+This distinction is valuable even without enforcement because it makes audits and reviews faster: you can skim a function and immediately see which checks are defensive input validation versus which are “this would indicate a bug” sanity checks. It also leaves room for future tightening (for example, compiling \sym{assert\_...} differently under a debug build) without changing call sites.
+
+\section{Bounded loops in I/O paths}
+Several modules implement retry loops that are explicitly capped:
+\begin{itemize}
+	\item \filep{src/term.c}: \sym{write\_all} caps retries with \sym{MAX\_WRITE\_LOOPS}.
+	\item \filep{src/log.c}: writing the log line caps retries with \sym{MAX\_WRITE\_LOOPS}.
+	\item \filep{src/runner.c}: the main wait loop is capped by \sym{MAX\_WAIT\_LOOPS}.
+\end{itemize}
+
+\begin{evidenceblock}
+{Potentially-blocking loops that retry on \off{EINTR} are capped by \sym{MAX\_WRITE\_LOOPS} or \sym{MAX\_WAIT\_LOOPS}.}
+{src/term.c, src/log.c, src/runner.c, include/config.h}
+{\sym{MAX\_WRITE\_LOOPS}, \sym{MAX\_WAIT\_LOOPS}}
+{This is a deliberate “fail instead of spin forever” posture.}
+\end{evidenceblock}
+
+\sowhat{This code is built to be audit-friendly: it uses fixed storage and explicit bounds to keep behavior predictable even under error conditions.}
+
+%======================================================================
+% CHAPTER 3
+%======================================================================
+\chapter{The in-memory model: \filep{include/model.h} and \filep{src/model.c}}
+\chapterroadmap{
+This chapter explains the core storage model: one buffer, plus offset/length slices into that buffer.
+}{
+	\item Understand \sym{struct Session} layout and lifetimes.
+	\item Understand how groups and items reference text without extra allocations.
+	\item Understand why offsets are used instead of pointers in the persisted model.
+}
+
+\section{The “buffer + slices” pattern}
+\sym{struct Session} contains:
+\begin{itemize}
+	\item A file buffer of \sym{MAX\_FILE\_BYTES + 1} bytes.
+	\item Arrays of \sym{struct Group} and \sym{struct Item}.
+	\item Counts (\sym{group\_count}, \sym{item\_count}) tracking how much is used.
+\end{itemize}
+
+\begin{evidenceblock}
+{Groups and items store offsets/lengths into a single session buffer rather than allocating per-line strings.}
+{include/model.h}
+{\sym{struct Session}, \sym{struct Group}, \sym{struct Item}}
+{\sym{struct Group} and \sym{struct Item} use \off{u32} offsets/lengths.}
+\end{evidenceblock}
+
+\section{Initialization}
+\filep{src/model.c} provides \sym{session\_init}, which resets all counts and buffer length.
+
+\begin{evidenceblock}
+{\sym{session\_init} resets \sym{buffer\_len}, \sym{group\_count}, and \sym{item\_count} to zero.}
+{src/model.c}
+{\sym{session\_init}}
+{This is the only explicit initialization step before parsing.}
+\end{evidenceblock}
+
+\subsection*{Code excerpt: session initialization}
+\begin{lstlisting}
+int session_init(struct Session *session)
+{
+	session->buffer_len = 0;
+	session->group_count = 0;
+	session->item_count = 0;
+	return 0;
+}
+\end{lstlisting}
+
+\sowhat{Because offsets refer into a single stable buffer, parsing is allocation-free after the initial read, and the runtime only needs the session object to display prompts.}
+
+%======================================================================
+% CHAPTER 4
+%======================================================================
+\chapter{Parsing: \filep{src/parser.c}}
+\chapterroadmap{
+This chapter walks from “read bytes from disk” to “validated session in memory”.
+}{
+	\item Follow the parsing pipeline (\sym{parse\_session\_file} \(\rightarrow\) read \(\rightarrow\) parse).
+	\item Understand how header lines and item lines are recognized.
+	\item Understand the failure modes and the error-buffer strategy.
+}
+
+\section{Parsing pipeline}
+The top-level entry point is \sym{parse\_session\_file}. It calls:
+\begin{itemize}
+	\item \sym{session\_init} to reset state.
+	\item \sym{read\_file\_into\_session} to populate the buffer.
+	\item \sym{parse\_session\_buffer} to scan and interpret lines.
+\end{itemize}
+
+% %@RS[ID=SRC_RS_PARSER_BUFFER_NUL_TERM_V1]
+% % CLAIM="After reading the session file, the parser NUL-terminates the buffer at buffer_len so later parsing can safely write temporary terminators."
+% % STATE=VERIFIED
+% % NEEDS_RESEARCH=NO
+% % GAPS="None."
+% % NEXT_ACTION="None."
+% % SEARCH_TERMS="read_file_into_session session->buffer[nread] = '\\0' fread MAX_FILE_BYTES"
+% % EVIDENCE="See read_file_into_session() excerpt below showing the overflow check and NUL terminator write."
+% % CONF=2
+% %@END
+
+\begin{evidenceblock}
+{\sym{parse\_session\_file} initializes the session, reads the file into \sym{session->buffer}, then parses the buffer line-by-line.}
+{src/parser.c}
+{\sym{parse\_session\_file}, \sym{read\_file\_into\_session}, \sym{parse\_session\_buffer}}
+{The buffer is NUL-terminated after read to allow safe temporary line termination during parsing.}
+\end{evidenceblock}
+
+\subsection*{Code excerpt: file read + NUL terminator}
+\begin{lstlisting}
+static int read_file_into_session(const char *path, struct Session *session,
+				  char *err_buf, size_t err_len)
+{
+	...
+	size_t nread = fread(session->buffer, 1, MAX_FILE_BYTES, fp);
+	...
+	int extra = fgetc(fp);
+
+	if (extra != EOF) {
+		...
+		return set_error(err_buf, err_len,
+				 "file exceeds MAX_FILE_BYTES");
+	}
+	...
+	session->buffer_len = nread;
+	session->buffer[nread] = '\0';
+	return 0;
+}
+\end{lstlisting}
+
+The parser reads the session file into \sym{session->buffer} with a fixed upper bound (\sym{MAX\_FILE\_BYTES}). The excerpt shows the core pattern: read up to the limit via \sym{fread}, then attempt one more byte via \sym{fgetc}. If that extra byte exists, the file is too large; the function closes the file and returns a structured parse error (\off{"file exceeds MAX\_FILE\_BYTES"}).
+
+Two lines at the bottom matter for later parsing correctness: \sym{session->buffer\_len = nread} records how many bytes were read, and \sym{session->buffer[nread] = '\\0'} appends a terminator. This terminator is not part of the session file; it is a convenience for the parser implementation.
+
+Specifically, later code in \sym{parse\_session\_buffer} writes temporary \off{'\\0'} bytes at line boundaries (and inside headers) to parse substrings without allocating new strings. Adding a final terminator ensures these temporary C-string operations cannot run off the end of the buffer even when the input file has no trailing newline.
+
+\section{Error reporting model}
+Parsing functions take an \off{err\_buf} and \off{err\_len}. On error they populate the buffer and return \off{-1}.
+
+\begin{evidenceblock}
+{Errors during parsing are reported by writing a message into a caller-provided buffer via helpers like \sym{set\_error\_line}.}
+{src/parser.c}
+{\sym{set\_error}, \sym{set\_error\_line}}
+{\sym{set\_error\_line} prefixes errors with \off{Line <n>:}.}
+\end{evidenceblock}
+
+\section{Line scanning and CRLF normalization}
+\sym{parse\_session\_buffer} scans for \off{\\textbackslash n}. If a line ends with \off{\\textbackslash r} before \off{\\textbackslash n}, the \off{\\textbackslash r} is excluded from the logical line length.
+
+\begin{evidenceblock}
+{If a line ends with \off{\\textbackslash r} before \off{\\textbackslash n}, \sym{parse\_session\_buffer} reduces the line length by one (CRLF normalization).}
+{src/parser.c}
+{\sym{parse\_session\_buffer}}
+{The check is against \off{session->buffer[line\_start + line\_len - 1]}.}
+\end{evidenceblock}
+
+\subsection*{Code excerpt: line scanning}
+\begin{lstlisting}
+for (size_t i = 0; i <= MAX_FILE_BYTES; i++) {
+	if (i == session->buffer_len || session->buffer[i] == '\n') {
+		size_t line_len = i - line_start;
+		if (line_len > 0 &&
+		    session->buffer[line_start + line_len - 1] == '\r')
+			line_len--;
+		...
+		line[line_len] = '\0';
+		int rc = handle_line(session, &state, line,
+				    line_len, line_start,
+				    err_buf, err_len);
+		...
+	}
+}
+\end{lstlisting}
+
+\section{Header vs item lines}
+The parser distinguishes:
+\begin{itemize}
+	\item Group header lines: \off{[<name> | <seconds>]}.
+	\item Item lines: any non-blank, non-comment line that is not a header.
+	\item Comments: lines whose first non-whitespace character is \off{\#}.
+\end{itemize}
+
+\begin{evidenceblock}
+{Blank lines and comment lines are ignored; a comment line is one whose first non-space character is \off{\#}.}
+{src/parser.c}
+{\sym{is\_blank\_or\_comment}}
+{Whitespace trimming uses \sym{trim\_left\_index} and \sym{trim\_right\_index}.}
+\end{evidenceblock}
+
+% %@RS[ID=SRC_RS_PARSER_COMMENT_BLANK_RULE_EXCERPT_V1]
+% % CLAIM="The parser treats a line as ignorable if, after trimming leading whitespace, it is empty or begins with '#'."
+% % STATE=UNVERIFIED
+% % NEEDS_RESEARCH=YES
+% % GAPS="Need an excerpt that shows trim_left_index usage and the line[start] == '#' test."
+% % NEXT_ACTION="Extract a 10–40 line excerpt from src/parser.c covering is_blank_or_comment() and its trim_left_index() call."
+% % SEARCH_TERMS="is_blank_or_comment trim_left_index line[start] == '#'"
+% % EVIDENCE="TODO: EX excerpt from src/parser.c is_blank_or_comment"
+% % CONF=0
+% %@END
+
+\subsection*{Code excerpt: comment/blank line rule (TODO)}
+\begin{lstlisting}
+/* TODO: EXCERPT (10–40 lines) from src/parser.c showing is_blank_or_comment():
+ * - trim_left_index()
+ * - empty line detection
+ * - comment detection (line[start] == '#')
+ * SEARCH_TERMS: is_blank_or_comment trim_left_index line[start] == '#'
+ */
+\end{lstlisting}
+
+\begin{evidenceblock}
+{A header line is recognized by leading \off{[}, trailing \off{]}, and a \off{|} separator inside.}
+{src/parser.c}
+{\sym{parse\_header\_line}, \sym{find\_pipe\_index}}
+{\sym{parse\_header\_line} temporarily NUL-terminates the name and seconds substrings by writing \off{'\\textbackslash0'} into the buffer.}
+\end{evidenceblock}
+
+\subsection*{Code excerpt: header split}
+\begin{lstlisting}
+line[line_len - 1] = '\0';
+line[pipe_index] = '\0';
+
+char *name = line + 1;
+...
+char *sec = line + pipe_index + 1;
+...
+rc = parse_seconds_value(sec, line_no, err_buf, err_len, &seconds);
+\end{lstlisting}
+
+% %@RS[ID=SRC_RS_PARSER_BUFFER_MUTATION_V1]
+% % CLAIM="Parsing mutates the session buffer by inserting NUL bytes (line terminators and header field splits), so later code must treat the buffer as a blob with embedded NULs and rely on stored offsets/lengths."
+% % STATE=VERIFIED
+% % NEEDS_RESEARCH=NO
+% % GAPS="None."
+% % NEXT_ACTION="None."
+% % SEARCH_TERMS="line[line_len] = '\\0' line[pipe_index] = '\\0' line[line_len - 1] = '\\0'"
+% % EVIDENCE="See excerpt below showing line termination in parse_session_buffer() and header field splitting in parse_header_line()."
+% % CONF=2
+% %@END
+
+\begin{evidenceblock}
+{The parser mutates \sym{session->buffer} by writing NUL bytes to temporarily split lines and header fields during parsing.}
+{src/parser.c}
+{\sym{parse\_session\_buffer}, \sym{parse\_header\_line}}
+{The writes are \off{line[line\_len] = '\\textbackslash0'} for line termination and \off{line[pipe\_index] = '\\textbackslash0'} for header splitting.}
+\end{evidenceblock}
+
+\subsection*{Code excerpt: buffer mutation}
+\begin{lstlisting}
+/* parse_session_buffer() */
+char *line = &session->buffer[line_start];
+
+line[line_len] = '\0';
+int rc = handle_line(session, &state, line,
+		    line_len, line_start,
+		    err_buf, err_len);
+
+/* parse_header_line() */
+line[line_len - 1] = '\0';
+line[pipe_index] = '\0';
+
+char *name = line + 1;
+...
+char *sec = line + pipe_index + 1;
+\end{lstlisting}
+
+The excerpt shows the core tradeoff of this parser: it uses the session buffer as both storage and a scratchpad. In \sym{parse\_session\_buffer}, each detected line is temporarily NUL-terminated (\off{line[line\_len] = '\\0'}) so downstream helpers can treat the line as a C string without allocating new memory.
+
+Headers require a second kind of split. \sym{parse\_header\_line} overwrites the closing bracket and the pipe separator with NUL bytes, turning \off{[name|seconds]} into two adjacent strings inside the same buffer: \off{name} and \off{sec}. That makes subsequent trimming and numeric parsing straightforward.
+
+This mutation is why the persistent session model stores offsets and lengths (\sym{struct Group} and \sym{struct Item}) rather than pointers to C strings: after parsing, \sym{session->buffer} is no longer a single NUL-terminated text blob, but a blob with embedded terminators. The runtime therefore uses offsets/lengths to print exact prompt bytes (including any internal punctuation) rather than depending on C-string semantics.
+
+\section{Seconds parsing}
+\sym{parse\_seconds\_value} parses seconds as base-10 via \sym{strtoul} and rejects values outside \off{[1, 86400]}.
+
+\begin{evidenceblock}
+{The per-group seconds value must parse as a decimal integer in the range \off{1..86400}.}
+{src/parser.c}
+{\sym{parse\_seconds\_value}}
+{\sym{parse\_seconds\_value} checks \sym{errno}, \sym{endptr}, and bounds.}
+\end{evidenceblock}
+
+% %@RS[ID=SRC_RS_PARSER_SECONDS_PARSE_EXCERPT_V1]
+% % CLAIM="Seconds are parsed with strtoul, require full-string consumption, and are rejected if outside 1..86400."
+% % STATE=UNVERIFIED
+% % NEEDS_RESEARCH=YES
+% % GAPS="Need an excerpt showing errno/endptr checks and the 1..86400 bounds."
+% % NEXT_ACTION="Extract a 10–40 line excerpt from src/parser.c covering parse_seconds_value()."
+% % SEARCH_TERMS="parse_seconds_value strtoul secs < 1 secs > 86400 endptr != '\\0' errno"
+% % EVIDENCE="TODO: EX excerpt from src/parser.c parse_seconds_value"
+% % CONF=0
+% %@END
+
+\subsection*{Code excerpt: seconds parsing (TODO)}
+\begin{lstlisting}
+/* TODO: EXCERPT (10–40 lines) from src/parser.c parse_seconds_value():
+ * show strtoul(), errno/endptr validation, and bounds 1..86400.
+ * SEARCH_TERMS: parse_seconds_value strtoul secs < 1 secs > 86400
+ */
+\end{lstlisting}
+
+\section{Enforced limits}
+Parsing rejects files that exceed configured bounds: maximum file bytes, maximum line length, maximum number of groups, maximum total items, and maximum items per group.
+
+\begin{evidenceblock}
+{Parsing fails fast when file size, line length, group count, or item counts exceed compile-time limits.}
+{include/config.h, src/parser.c}
+{\sym{MAX\_FILE\_BYTES}, \sym{MAX\_LINE\_LEN}, \sym{MAX\_GROUPS}, \sym{MAX\_ITEMS\_TOTAL}, \sym{MAX\_ITEMS\_PER\_GROUP}}
+{The checks appear in \sym{read\_file\_into\_session}, \sym{parse\_session\_buffer}, \sym{parse\_header\_line}, and \sym{parse\_item\_line}.}
+\end{evidenceblock}
+
+\section{Structural validity: groups must have items}
+
+% %@RS[ID=SRC_RS_PARSER_EMPTY_GROUP_CHECKS_V1]
+% % CLAIM="The parser rejects sessions where a group has zero items (both for intermediate groups and for the final group)."
+% % STATE=VERIFIED
+% % NEEDS_RESEARCH=NO
+% % GAPS="None."
+% % NEXT_ACTION="None."
+% % SEARCH_TERMS="previous group has no items last group has no items handle_line parse_session_buffer"
+% % EVIDENCE="See excerpt below showing the previous-group and last-group empty checks and their error strings."
+% % CONF=2
+% %@END
+
+The parser is strict about session structure: a group header must be followed by at least one item line before another group header (or EOF) is accepted.
+
+\begin{evidenceblock}
+{The parser rejects any group that contains zero items, both when a new header appears and at end-of-file.}
+{src/parser.c}
+{\sym{handle\_line}, \sym{parse\_session\_buffer}}
+{The error strings are \off{"previous group has no items"} and \off{"last group has no items"}.}
+\end{evidenceblock}
+
+\subsection*{Code excerpt: empty-group rejection}
+\begin{lstlisting}
+static int handle_line(...)
+{
+	...
+	if (line[0] == '[') {
+		if (state->has_group) {
+			const struct Group *group =
+				&session->groups[state->current_group];
+			if (group->item_count == 0)
+				return set_error_line(err_buf, err_len,
+						      state->line_no,
+						      "previous group has no items");
+		}
+		...
+	}
+	...
+}
+
+static int parse_session_buffer(...)
+{
+	...
+	if (state.has_group) {
+		const struct Group *group =
+			&session->groups[state.current_group];
+		if (group->item_count == 0)
+			return set_error_line(err_buf, err_len, state.line_no,
+					      "last group has no items");
+	}
+	...
+}
+\end{lstlisting}
+
+The key design choice here is \emph{early structural rejection}. In \sym{handle\_line}, the parser only allows a new header line if the \emph{previous} group has received at least one item. It does this at the moment it sees the next \off{[...|...]} header, because that is the first time it can be sure the previous group is “finished” (no more items will be attached to it).
+
+The second check closes the loophole at end-of-file. If the file ends immediately after a header (or after blank/comment lines that do not count as items), there is no “next header” to trigger the previous-group check. \sym{parse\_session\_buffer} therefore performs a final validation after the line scan, rejecting a trailing empty group with the explicit error \off{"last group has no items"}.
+
+Together these checks establish an invariant the runtime can rely on: every \sym{struct Group} described by the session has at least one corresponding \sym{struct Item}. That simplifies later code: the runner can assert that per-group item counts are non-zero without needing to handle “empty group” as a special case.
+
+\sowhat{Because the parser writes NULs into the buffer while processing, any “string” pointers produced during parsing are treated as temporary; the persistent model is offsets/lengths into the original buffer.}
+
+%======================================================================
+% CHAPTER 5
+%======================================================================
+\chapter{Randomness and shuffling: \filep{src/rng.c}}
+\chapterroadmap{
+This chapter explains how the program generates pseudo-randomness and uses it to shuffle groups and items.
+}{
+	\item Understand seeding strategy and fallback behavior.
+	\item Understand unbiased range selection.
+	\item Understand the shuffle loops and their bounds.
+}
+
+\section{Seeding}
+\sym{rng\_init} prefers \filep{/dev/urandom}. If it fails or reads short, it falls back to combining realtime clock and PID, then mixes the seed before storing it in \sym{rng->state}.
+
+\begin{evidenceblock}
+{\sym{rng\_init} attempts to seed from \filep{/dev/urandom} and falls back to \off{CLOCK\_REALTIME} and \sym{getpid()}.}
+{src/rng.c}
+{\sym{rng\_init}}
+{If \filep{/dev/urandom} cannot be read fully, the code forces \off{seed = 0} and uses the fallback path.}
+\end{evidenceblock}
+
+% %@RS[ID=SRC_RS_RNG_INIT_SEED_FALLBACK_EXCERPT_V1]
+% % CLAIM="rng_init uses /dev/urandom when available; otherwise it derives a seed from CLOCK_REALTIME and PID, then applies a mixing function and forces a non-zero state."
+% % STATE=UNVERIFIED
+% % NEEDS_RESEARCH=YES
+% % GAPS="Need an excerpt showing the /dev/urandom read, the seed==0 fallback, the mix64 call, and the non-zero state fixup."
+% % NEXT_ACTION="Extract a 10–40 line excerpt from src/rng.c covering rng_init() from seed acquisition through rng->state initialization."
+% % SEARCH_TERMS="int rng_init open(\"/dev/urandom\" seed == 0 clock_gettime getpid mix64 rng->state == 0"
+% % EVIDENCE="TODO: EX excerpt from src/rng.c rng_init"
+% % CONF=0
+% %@END
+
+\subsection*{Code excerpt: rng_init seeding (TODO)}
+\begin{lstlisting}
+/* TODO: EXCERPT (10–40 lines) from src/rng.c rng_init():
+ * show /dev/urandom attempt, seed==0 fallback (CLOCK_REALTIME + PID), mix64, and non-zero state fixup.
+ * SEARCH_TERMS: open(\"/dev/urandom\" seed == 0 clock_gettime getpid mix64
+ */
+\end{lstlisting}
+
+\section{Range selection}
+\sym{rng\_range} computes a threshold and retries up to \sym{RNG\_RETRY\_LIMIT} times to avoid modulo bias.
+
+\begin{evidenceblock}
+{\sym{rng\_range} uses a threshold and retries up to \sym{RNG\_RETRY\_LIMIT} to implement a bias-resistant mapping from \sym{u64} to \off{[0, upper)}.}
+{src/rng.c, include/config.h}
+{\sym{rng\_range}, \sym{RNG\_RETRY\_LIMIT}}
+{After retries, it falls back to a direct modulo of the next RNG output.}
+\end{evidenceblock}
+
+\subsection*{Code excerpt: unbiased range}
+\begin{lstlisting}
+u64 threshold = (u64)(-upper) % upper;
+
+for (size_t i = 0; i < RNG_RETRY_LIMIT; i++) {
+	u64 r = rng_next_u64(rng);
+	if (r >= threshold)
+		return (size_t)(r % upper);
+}
+return (size_t)(rng_next_u64(rng) % upper);
+\end{lstlisting}
+
+\section{Shuffling}
+The shuffle helpers implement a bounded Fisher--Yates-style loop from \off{i=1..count-1} where \off{j} is selected from \off{[0..i]}.
+
+\begin{evidenceblock}
+{\sym{rng\_shuffle\_groups} and \sym{rng\_shuffle\_items} shuffle by swapping each position \off{i} with a random \off{j} in \off{[0..i]}.}
+{src/rng.c}
+{\sym{rng\_shuffle\_groups}, \sym{rng\_shuffle\_items}}
+{Both loops are bounded by \sym{MAX\_GROUPS} or \sym{MAX\_ITEMS\_PER\_GROUP} and stop at \off{count}.}
+\end{evidenceblock}
+
+\sowhat{The RNG module is intentionally narrow: it exposes just enough surface area to support shuffling and avoids “random utility” sprawl.}
+
+%======================================================================
+% CHAPTER 6
+%======================================================================
+\chapter{Terminal interface: \filep{src/term.c}}
+\chapterroadmap{
+This chapter explains how the program interacts with the terminal: raw mode, cursor control, screen clearing, and timed key reads.
+}{
+	\item Understand what “raw mode” means here.
+	\item Understand how key reads are implemented with \sym{select}.
+	\item Understand how ANSI escape sequences are written safely.
+}
+
+\section{Raw mode entry and restore}
+\sym{term\_enter\_raw} obtains current settings with \sym{tcgetattr}, modifies them to disable canonical mode and echo, and applies them with \sym{tcsetattr}.
+
+% %@RS[ID=SRC_RS_TERM_ISIG_CTRL_C_V1]
+% % CLAIM="Raw mode disables ISIG, so Ctrl+C is read as byte 3 (ETX) instead of generating SIGINT; the runner treats key==3 as a clean exit."
+% % STATE=VERIFIED
+% % NEEDS_RESEARCH=NO
+% % GAPS="None."
+% % NEXT_ACTION="None."
+% % SEARCH_TERMS="raw.c_lflag ISIG handle_key key == 3"
+% % EVIDENCE="See term_enter_raw() excerpt below clearing ISIG and the handle_key() excerpt in Chapter 8 showing key==3 exit."
+% % CONF=2
+% %@END
+
+\begin{evidenceblock}
+{\sym{term\_enter\_raw} switches \off{STDIN} into a raw-ish mode by modifying \sym{termios} flags and setting \off{VMIN=0}, \off{VTIME=0}.}
+{src/term.c}
+{\sym{term\_enter\_raw}}
+{If \sym{tcgetattr} or \sym{tcsetattr} fails, the error is formatted into a caller-provided buffer.}
+\end{evidenceblock}
+
+\begin{evidenceblock}
+{Raw mode disables signal generation (\off{ISIG}) so Ctrl+C arrives as byte \off{3} (ETX) instead of generating SIGINT; the runner treats \off{key == 3} as a clean exit.}
+{src/term.c, src/runner.c}
+{\sym{term\_enter\_raw}, \sym{handle\_key}}
+{\sym{term\_enter\_raw} clears \off{ISIG}; \sym{handle\_key} checks \off{key == 3} before any advance-key logic.}
+\end{evidenceblock}
+
+\subsection*{Code excerpt: raw termios flags}
+\begin{lstlisting}
+struct termios raw = state->original;
+
+raw.c_lflag &= (tcflag_t)~(ECHO | ICANON | IEXTEN | ISIG);
+raw.c_iflag &= (tcflag_t)~(IXON | ICRNL | BRKINT | INPCK | ISTRIP);
+raw.c_oflag &= (tcflag_t)~(OPOST);
+raw.c_cflag |= (CS8);
+raw.c_cc[VMIN] = 0;
+raw.c_cc[VTIME] = 0;
+
+rc = tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw);
+\end{lstlisting}
+
+The most important flag in this excerpt is \off{ISIG}. Clearing it disables the terminal driver’s signal-generation behavior for special characters such as Ctrl+C. In canonical terminal modes, Ctrl+C typically generates SIGINT; here, it becomes just another byte delivered to the program’s input stream.
+
+That design choice is what makes the runner’s exit logic deterministic and testable at the byte level. In Chapter 8, \sym{handle\_key} treats \off{key == 3} (ETX) as a clean exit request; with \off{ISIG} disabled, the runner reliably sees that byte instead of being asynchronously interrupted by a signal.
+
+The remaining settings establish the “single-byte polling” contract used by the runtime loop: \off{ICANON} is cleared so input is not line-buffered, \off{ECHO} is cleared so typed characters are not echoed, and \off{VMIN=0}/\off{VTIME=0} make reads non-blocking (the blocking behavior is implemented explicitly via \sym{select} in \sym{term\_read\_key\_timeout}).
+
+\begin{evidenceblock}
+{\sym{term\_restore} is idempotent: if \sym{state->active} is false it returns success without calling \sym{tcsetattr}.}
+{src/term.c}
+{\sym{term\_restore}}
+{On restore failure it clears \sym{state->active} and returns error.}
+\end{evidenceblock}
+
+\section{Screen control}
+The module provides cursor hide/show and a clear-screen operation by writing ANSI escape sequences to \off{STDOUT}.
+
+\begin{evidenceblock}
+{\sym{term\_clear\_screen}, \sym{term\_hide\_cursor}, and \sym{term\_show\_cursor} write ANSI escape sequences via \sym{write\_all}.}
+{src/term.c}
+{\sym{term\_clear\_screen}, \sym{term\_hide\_cursor}, \sym{term\_show\_cursor}}
+{The sequences are \off{"\\textbackslash033[2J\\textbackslash033[H"}, \off{"\\textbackslash033[?25l"}, and \off{"\\textbackslash033[?25h"}.}
+\end{evidenceblock}
+
+\section{Timed key reads}
+\sym{term\_read\_key\_timeout} waits for readability with \sym{select} and then reads one byte from \off{STDIN}.
+
+\begin{evidenceblock}
+{\sym{term\_read\_key\_timeout} uses \sym{select} to wait for input and reads a single byte; it returns \off{1} when a key is read, \off{0} on timeout, and \off{-1} on error.}
+{src/term.c}
+{\sym{term\_read\_key\_timeout}}
+{When \off{timeout\_ms} is \off{-1}, it blocks indefinitely by passing \off{NULL} timeout to \sym{select}.}
+\end{evidenceblock}
+
+% %@RS[ID=SRC_RS_TERM_TIMEOUT_NEG1_EXCERPT_V1]
+% % CLAIM="term_read_key_timeout uses a NULL timeval pointer when timeout_ms < 0, and otherwise constructs tv_sec/tv_usec from timeout_ms."
+% % STATE=UNVERIFIED
+% % NEEDS_RESEARCH=YES
+% % GAPS="Need excerpt showing tv_ptr initialization and the timeout_ms>=0 branch."
+% % NEXT_ACTION="Extract a 10–40 line excerpt from src/term.c term_read_key_timeout() covering tv/tv_ptr setup and the select() call."
+% % SEARCH_TERMS="term_read_key_timeout timeout_ms >= 0 tv_ptr = &tv tv.tv_sec tv.tv_usec select("
+% % EVIDENCE="TODO: EX excerpt from src/term.c term_read_key_timeout timeout selection"
+% % CONF=0
+% %@END
+
+\subsection*{Code excerpt: timeout=-1 selects NULL timeval (TODO)}
+\begin{lstlisting}
+/* TODO: EXCERPT (10–40 lines) from src/term.c term_read_key_timeout():
+ * show tv_ptr = NULL when timeout_ms < 0, and tv setup when timeout_ms >= 0.
+ * SEARCH_TERMS: struct timeval *tv_ptr = NULL timeout_ms >= 0 tv_ptr = &tv select(
+ */
+\end{lstlisting}
+
+\subsection*{Code excerpt: select/read}
+\begin{lstlisting}
+int ready = select(STDIN_FILENO + 1, &readfds, NULL, NULL, tv_ptr);
+...
+unsigned char ch = 0;
+ssize_t n = read(STDIN_FILENO, &ch, 1);
+if (n == 1) {
+	*out_key = (int)ch;
+	return 1;
+}
+\end{lstlisting}
+
+\sowhat{The terminal module is carefully scoped: it does not parse escape sequences or implement a UI framework; it only offers the primitives needed by the runtime loop.}
+
+%======================================================================
+% CHAPTER 7
+%======================================================================
+\chapter{Logging: \filep{src/log.c}}
+\chapterroadmap{
+This chapter explains the append-only log, its timestamping, and how logging failure is handled.
+}{
+	\item Understand where the log file is opened and where it lives.
+	\item Understand the log line format.
+	\item Understand the “logging is best-effort” behavior.
+}
+
+\section{Open/close lifecycle}
+\sym{log\_open} attempts to open \filep{cram.log} with append semantics. If open fails, it prints a warning to stderr and continues with logging disabled.
+
+% %@RS[ID=SRC_RS_LOG_OPEN_FAILURE_NONFATAL_V1]
+% % CLAIM="If opening cram.log fails, log_open prints a warning to stderr and returns success, leaving logging disabled for the rest of the run."
+% % STATE=VERIFIED
+% % NEEDS_RESEARCH=NO
+% % GAPS="None."
+% % NEXT_ACTION="None."
+% % SEARCH_TERMS="log_open open(\"cram.log\" Warning: failed to open cram.log g_log_fd < 0"
+% % EVIDENCE="See the log_open() excerpt below showing the open() failure branch, warning write, and return 0."
+% % CONF=2
+% %@END
+
+\begin{evidenceblock}
+{\sym{log\_open} uses \sym{open("cram.log", O\_WRONLY | O\_CREAT | O\_APPEND, 0644)} and treats failure as non-fatal (prints a warning and returns success).}
+{src/log.c}
+{\sym{log\_open}}
+{The global \sym{g\_log\_fd} remains negative when logging is disabled.}
+\end{evidenceblock}
+
+\subsection*{Code excerpt: \sym{log\_open} failure is non-fatal}
+\begin{lstlisting}
+g_log_fd = open("cram.log", O_WRONLY | O_CREAT | O_APPEND, 0644);
+if (g_log_fd < 0) {
+	const char *err = strerror(errno);
+
+	if (!err)
+		err = "unknown error";
+	char msg[256];
+	int rc = snprintf(msg, sizeof(msg),
+			  "Warning: failed to open cram.log: %s\n",
+			  err);
+	if (rc < 0 || (size_t)rc >= sizeof(msg))
+		return -1;
+	int wrc = write_all_fd(STDERR_FILENO, msg, (size_t)rc);
+
+	if (wrc != 0)
+		return -1;
+	return 0;
+}
+\end{lstlisting}
+
+This excerpt shows the project’s logging philosophy in its most explicit form: logging is a best-effort side channel, not a dependency. \sym{log\_open} tries to open \filep{cram.log} for append. If that fails, it does \emph{not} fail the session; it formats a warning and writes it to \off{stderr}, then returns \off{0} (success) with \sym{g\_log\_fd} still negative.
+
+The consequence is that the rest of the logging API becomes a no-op by convention. Other functions in \filep{src/log.c} check \sym{g\_log\_fd < 0} and return success without emitting output. This ensures the runtime loop does not have to thread “logging enabled?” through its logic; it simply calls \sym{log\_...} functions and relies on their internal guard.
+
+There is also an error boundary inside the “non-fatal” path: if even the warning cannot be formatted or written (\sym{snprintf} failure or \sym{write\_all\_fd} failure), \sym{log\_open} returns \off{-1}. In other words, failing to open the log is acceptable; failing to report the failure is treated as a hard error.
+
+\begin{evidenceblock}
+{Most log functions return success without doing anything when \sym{g\_log\_fd < 0}.}
+{src/log.c}
+{\sym{log\_simple}, \sym{log\_key}, \sym{log\_prompt}, \sym{log\_group}, \sym{log\_shuffle}}
+{This implements the “best-effort logging” policy.}
+\end{evidenceblock}
+
+% %@RS[ID=SRC_RS_LOG_TAG_TAXONOMY_TODO_V1]
+% % CLAIM="The set of log tags used by the program is small and enumerable from call sites, and documenting it improves auditability."
+% % STATE=UNVERIFIED
+% % NEEDS_RESEARCH=YES
+% % GAPS="Need an inventory of tags (start/exit/key/prompt/group/expired/shuffle/items/error/etc.) and the functions/conditions that emit them."
+% % NEXT_ACTION="Search for log_write/log_simple/log_group/log_shuffle/log_prompt/log_key call sites in src/*.c, extract the tag literals, and build a small longtable mapping tag -> emitter -> meaning."
+% % SEARCH_TERMS="log_simple( log_group( log_shuffle( log_prompt( log_key( \"start\" \"exit\" \"expired\" \"shuffle\" \"items\" \"error\""
+% % EVIDENCE="TODO: table built from repository call sites"
+% % CONF=0
+% %@END
+
+\subsection*{TODO: log tag taxonomy table}
+\begin{longtable}{>{\raggedright\arraybackslash}p{0.18\linewidth} >{\raggedright\arraybackslash}p{0.32\linewidth} >{\raggedright\arraybackslash}p{0.42\linewidth}}
+\textbf{Tag} & \textbf{Emitter(s)} & \textbf{Meaning / When it fires}\\\hline
+% TODO: Fill from call sites; keep this table small and exhaustive.
+% Suggested starting tags: start, exit, key, prompt, group, expired, shuffle, items, error.
+\end{longtable}
+
+\section{Timestamp and line format}
+\sym{log\_write} timestamps with \off{CLOCK\_REALTIME} and formats lines like:
+\begin{quote}\small\sloppy
+\texttt{<unix\_seconds>.<milliseconds> [<tag>] <message>}
+\end{quote}
+
+\begin{evidenceblock}
+{Log lines include realtime seconds and milliseconds and use \texttt{[\%s]} tag framing.}
+{src/log.c}
+{\sym{log\_write}}
+{The format string is \texttt{"\%llu.\%03llu [\%s] \%s\textbackslash n"}.}
+\end{evidenceblock}
+
+\subsection*{Code excerpt: formatting a log line}
+\begin{lstlisting}
+u64 sec = (u64)ts.tv_sec;
+u64 ms = (u64)(ts.tv_nsec / 1000000L);
+char line[256];
+
+rc = snprintf(line, sizeof(line), "%llu.%03llu [%s] %s\n",
+	      (unsigned long long)sec,
+	      (unsigned long long)ms, tag, msg);
+\end{lstlisting}
+
+\sowhat{Logging is designed to never prevent the program from running; it is for post-mortem understanding and auditing, not correctness.}
+
+%======================================================================
+% CHAPTER 8
+%======================================================================
+\chapter{The runtime loop: \filep{src/runner.c}}
+\chapterroadmap{
+This chapter is the core: how prompts are displayed, how timers and group switches work, and how key input drives state transitions.
+}{
+	\item Understand the runtime state machine (\sym{struct runtime}).
+	\item Understand group selection and item selection.
+	\item Understand the “pending switch” mechanism.
+}
+
+\section{Runtime state and context}
+\filep{src/runner.c} separates:
+\begin{itemize}
+	\item \sym{struct ctx}: pointers to shared inputs (session, rng, scratch arrays).
+	\item \sym{struct runtime}: mutable runtime state (current indices, timers, flags).
+\end{itemize}
+
+\begin{evidenceblock}
+{The runtime loop separates immutable-ish context (\sym{struct ctx}) from mutable run state (\sym{struct runtime}).}
+{src/runner.c}
+{\sym{struct ctx}, \sym{struct runtime}}
+{This keeps parameter lists small and makes state flow explicit.}
+\end{evidenceblock}
+
+\section{Timekeeping}
+Group timing uses \off{CLOCK\_MONOTONIC} measured in milliseconds; logging timestamps are separate (they use \off{CLOCK\_REALTIME} in \filep{src/log.c}).
+
+\begin{evidenceblock}
+{Group timers use \off{CLOCK\_MONOTONIC} converted to milliseconds via \sym{now\_ms}.}
+{src/runner.c}
+{\sym{now\_ms}, \sym{update\_group\_timer}}
+{\sym{update\_group\_timer} sets \sym{rt->group\_end = now + seconds*1000}.}
+\end{evidenceblock}
+
+\section{Group order and item order}
+The runner maintains two independent shuffled sequences:
+\begin{itemize}
+	\item \textbf{Group order}: a permutation of group indices, reshuffled when exhausted.
+	\item \textbf{Item order}: a permutation of item indices within the current group, reshuffled when exhausted.
+\end{itemize}
+
+\begin{evidenceblock}
+{When the group order is exhausted, the runner reshuffles the group order and resets \sym{rt->order\_pos}.}
+{src/runner.c}
+{\sym{select\_next\_group}}
+{The reshuffle is logged via \sym{log\_simple("shuffle", "groups")}.}
+\end{evidenceblock}
+
+% %@RS[ID=SRC_RS_RUNNER_GROUP_SHUFFLE_EXCERPT_V1]
+% % CLAIM="select_next_group reshuffles group_order when order_pos reaches group_count, logs the 'shuffle'/'groups' event, and then consumes the next group index."
+% % STATE=VERIFIED
+% % NEEDS_RESEARCH=NO
+% % GAPS="None."
+% % NEXT_ACTION="None."
+% % SEARCH_TERMS="select_next_group order_pos >= session->group_count rng_shuffle_groups log_simple(\"shuffle\", \"groups\")"
+% % EVIDENCE="See the select_next_group() excerpt below showing the reshuffle+log branch and the consumption of group_order[order_pos]."
+% % CONF=2
+% %@END
+
+\subsection*{Code excerpt: group reshuffle on exhaustion}
+\begin{lstlisting}
+static int select_next_group(const struct ctx *c, struct runtime *rt)
+{
+	...
+	if (rt->order_pos >= c->session->group_count) {
+		int rc = rng_shuffle_groups(c->rng, c->group_order,
+					 c->session->group_count);
+		if (rc != 0)
+			return -1;
+		rt->order_pos = 0;
+		rc = log_simple("shuffle", "groups");
+		if (rc != 0)
+			return -1;
+	}
+	rt->group_index = c->group_order[rt->order_pos];
+	rt->order_pos++;
+	return 0;
+}
+\end{lstlisting}
+
+This function is the “group iterator” for the runtime loop. It uses a scratch array (\sym{group\_order}) as a permutation of group indices and a cursor (\sym{rt->order\_pos}) that points at the next index to consume.
+
+The exhaustion check is explicit: when \sym{order\_pos} reaches \sym{group\_count}, the order array is reshuffled in-place by \sym{rng\_shuffle\_groups} and the cursor is reset to zero. Immediately after reshuffling, the code logs a \off{shuffle} event with payload \off{groups}. (If logging is disabled, \sym{log\_simple} is a no-op and the runtime proceeds unchanged.)
+
+Only after ensuring there is a valid next slot does the function read \sym{group\_order[order\_pos]} into \sym{rt->group\_index} and advance the cursor. That separation (reshuffle/prepare, then consume) is what gives the program its “no repeats until exhausted” behavior at the group level without needing any dynamic memory or per-group bookkeeping.
+
+\begin{evidenceblock}
+{When items in a group are exhausted, the runner reshuffles that group’s item order and logs an \off{items} shuffle event.}
+{src/runner.c}
+{\sym{advance\_prompt}}
+{On wraparound it calls \sym{rng\_shuffle\_items} and \sym{log\_shuffle("items", group\_index)}.}
+\end{evidenceblock}
+
+% %@RS[ID=SRC_RS_RUNNER_ITEM_SHUFFLE_WRAP_EXCERPT_V1]
+% % CLAIM="advance_prompt increments item_pos; when it reaches the group item_count it reshuffles item_order, logs an 'items' shuffle event, and wraps item_pos to zero."
+% % STATE=VERIFIED
+% % NEEDS_RESEARCH=NO
+% % GAPS="None."
+% % NEXT_ACTION="None."
+% % SEARCH_TERMS="advance_prompt rt->item_pos++ rt->item_pos >= count rng_shuffle_items log_shuffle(\"items\""
+% % EVIDENCE="See the advance_prompt() excerpt below showing the wraparound reshuffle and log_shuffle(\"items\", ...)."
+% % CONF=2
+% %@END
+
+\subsection*{Code excerpt: item reshuffle on wraparound}
+\begin{lstlisting}
+if (due_to_switch) {
+	...
+} else {
+	rt->item_pos++;
+	if (rt->item_pos >= count) {
+		int rc = rng_shuffle_items(c->rng, c->item_order,
+				   count);
+		if (rc != 0)
+			return -1;
+		rt->item_pos = 0;
+		rc = log_shuffle("items", rt->group_index);
+		if (rc != 0)
+			return -1;
+	}
+}
+\end{lstlisting}
+
+The runner uses \sym{rt->item\_pos} as a cursor into the current group’s shuffled item order. For the normal “stay in the same group” path (\off{due\_to\_switch == 0}), it increments the cursor on every advance.
+
+The wraparound condition is checked against the group’s runtime item count (\off{count}). When the cursor reaches \off{count}, the code immediately reshuffles the item-order array in place via \sym{rng\_shuffle\_items}, resets \sym{rt->item\_pos} to zero, and emits a log event tagged \off{items} for the current group index.
+
+This is the item-level analogue of the group-order exhaustion logic: within a group, you get a full pass through the current permutation before repeats occur, and the “next cycle” boundary is both explicit in the code and observable in \filep{cram.log} when logging is enabled.
+
+\section{The “pending switch” mechanism}
+The key detail is that group expiry does not immediately switch groups. Instead:
+\begin{itemize}
+	\item When the timer expires, the runner marks \sym{rt->pending\_switch = 1}.
+	\item The next \emph{advance key} applies the group switch, then advances.
+\end{itemize}
+
+\begin{evidenceblock}
+{Timer expiry sets \sym{rt->pending\_switch = 1} and logs an \off{expired} event, but does not switch groups immediately.}
+{src/runner.c}
+{\sym{update\_expiry}}
+{The “pending switch” flag defers the group switch until the next advance key.}
+\end{evidenceblock}
+
+\subsection*{Code excerpt: expiry handling}
+\begin{lstlisting}
+if (now >= rt->group_end) {
+	rt->pending_switch = 1;
+	rc = log_group("expired", rt->group_index);
+	if (rc != 0)
+		return -1;
+	return 0;
+}
+\end{lstlisting}
+
+% %@RS[ID=SRC_RS_RUNNER_PENDING_SWITCH_BLOCKING_V1]
+% % CLAIM="When a group has expired and pending_switch is set, the runner stops polling with timeouts and instead blocks indefinitely for the next key (timeout=-1)."
+% % STATE=VERIFIED
+% % NEEDS_RESEARCH=NO
+% % GAPS="None."
+% % NEXT_ACTION="None."
+% % SEARCH_TERMS="read_key pending_switch ? -1 term_read_key_timeout"
+% % EVIDENCE="See read_key() excerpt below (timeout = pending_switch ? -1 : remaining_ms)."
+% % CONF=2
+% %@END
+
+\begin{evidenceblock}
+{When \sym{rt->pending\_switch} is set, \sym{read\_key} uses \off{timeout = -1}, so the program blocks indefinitely waiting for a key rather than polling.}
+{src/runner.c}
+{\sym{read\_key}}
+{The timeout is computed as \off{rt->pending\_switch ? -1 : (int)remaining\_ms}.}
+\end{evidenceblock}
+
+\subsection*{Code excerpt: pending-switch timeout=-1}
+\begin{lstlisting}
+static int read_key(const struct ctx *c, const struct runtime *rt,
+		    u64 remaining_ms, int *key_out)
+{
+	if (!validate_ptr(c))
+		return -1;
+	if (!validate_ptr(rt))
+		return -1;
+	if (!validate_ptr(key_out))
+		return -1;
+	if (!validate_ok(remaining_ms <= 86400000ULL))
+		return -1;
+
+	int timeout = rt->pending_switch ? -1 : (int)remaining_ms;
+	int rc = term_read_key_timeout(timeout, key_out);
+
+	if (rc < 0)
+		return -1;
+	return rc;
+}
+\end{lstlisting}
+
+The runner’s normal behavior is time-bounded polling: it computes \off{remaining\_ms} until the current group expires, then passes that as a timeout to \sym{term\_read\_key\_timeout}. A return value of \off{0} means “no key yet”; the runtime loops, recomputes time remaining, and tries again.
+
+When \sym{rt->pending\_switch} is set, this behavior intentionally changes. The excerpt shows \sym{read\_key} forcing \off{timeout = -1}. In \filep{src/term.c}, \sym{term\_read\_key\_timeout} treats \off{-1} as “wait forever” by calling \sym{select} with a \off{NULL} timeout. This guarantees that, once the group has expired, the program is no longer waking up just to notice the passage of time; it sleeps until the user presses a key.
+
+This choice is part of the contract implied by the phrase “group changes only apply after the timer expires and you press a key”: expiry is detected by \sym{update\_expiry}, but the user’s next advance key is what triggers the switch path in \sym{handle\_key}.
+
+\begin{evidenceblock}
+{If \sym{rt->pending\_switch} is set and an advance key is pressed, the runner selects the next group and advances due to switch.}
+{src/runner.c}
+{\sym{handle\_key}, \sym{select\_next\_group}, \sym{advance\_prompt}}
+{\sym{advance\_prompt} reinitializes and reshuffles item order when switching groups.}
+\end{evidenceblock}
+
+\subsection*{Code excerpt: applying a pending switch}
+\begin{lstlisting}
+if (rt->pending_switch) {
+	rc = select_next_group(c, rt);
+	if (rc != 0)
+		return -1;
+	rt->pending_switch = 0;
+	rc = advance_prompt(c, rt, 1);
+	if (rc != 0)
+		return -1;
+}
+\end{lstlisting}
+
+\section{Key handling and exit}
+Key handling is intentionally simple:
+\begin{itemize}
+	\item \off{Ctrl+C} (byte value \off{3}) causes the runner to exit successfully.
+	\item Space, Enter, and alphanumeric characters advance.
+	\item Other keys are ignored (but still logged when logging is enabled).
+\end{itemize}
+
+\begin{evidenceblock}
+{\sym{handle\_key} treats key \off{3} as an exit request and considers space, newline, carriage return, and alphanumerics as “advance keys”.}
+{src/runner.c}
+{\sym{handle\_key}, \sym{is\_advance\_key}}
+{\sym{handle\_key} logs every key via \sym{log\_key} before interpreting it.}
+\end{evidenceblock}
+
+% %@RS[ID=SRC_RS_RUNNER_KEY_CLASSIFICATION_V1]
+% % CLAIM="The runner logs every key, exits when key==3, advances only on space/CR/LF/alnum, and otherwise ignores input."
+% % STATE=VERIFIED
+% % NEEDS_RESEARCH=NO
+% % GAPS="None."
+% % NEXT_ACTION="None."
+% % SEARCH_TERMS="handle_key log_key key == 3 is_advance_key"
+% % EVIDENCE="See handle_key() excerpt below showing log-first ordering, Ctrl+C exit, and advance-key filtering."
+% % CONF=2
+% %@END
+
+\begin{evidenceblock}
+{The runner always logs the key before interpreting it; Ctrl+C exits immediately; only a small set of “advance keys” trigger an advance.}
+{src/runner.c}
+{\sym{handle\_key}}
+{The ordering is \sym{log\_key} \(\rightarrow\) \off{key == 3} exit \(\rightarrow\) \sym{is\_advance\_key} filter \(\rightarrow\) advance.}
+\end{evidenceblock}
+
+\subsection*{Code excerpt: key handling order}
+\begin{lstlisting}
+static int handle_key(const struct ctx *c, struct runtime *rt,
+		      int key, int *advanced)
+{
+	...
+	int rc = log_key(key);
+
+	if (rc != 0)
+		return -1;
+	if (key == 3)
+		return 1;
+	if (!is_advance_key(key))
+		return 0;
+	...
+	*advanced = 1;
+	return 0;
+}
+\end{lstlisting}
+
+The ordering matters because it defines what ends up in \filep{cram.log}. The call to \sym{log\_key} happens \emph{before} any control-flow decision, which means keys that do nothing (non-advance keys) are still recorded, and keys that terminate the session (Ctrl+C) are also recorded (assuming logging is enabled).
+
+The early \off{key == 3} return is the program’s exit convention: it treats byte value \off{3} (ETX, the usual Ctrl+C character) as a clean shutdown request and returns a positive value to its caller to break out of the wait loop without signaling an error.
+
+Finally, the \sym{is\_advance\_key} gate enforces a small vocabulary of “advance” inputs. Everything else is ignored intentionally: the runtime does not try to interpret arrow keys or escape sequences as commands. This keeps the loop’s state machine simple and makes it hard to accidentally add UI surface area without touching \sym{is\_advance\_key} on purpose.
+
+\section{Terminal lifecycle}
+The runtime enters raw mode and hides the cursor before running the loop; on exit it restores the terminal, shows the cursor, and clears the screen.
+
+\begin{evidenceblock}
+{The runner wraps the loop in a “terminal session”: enter raw mode, hide cursor, run loop, restore terminal, show cursor, clear screen.}
+{src/runner.c}
+{\sym{run\_with\_terminal}}
+{Restore/show/clear are asserted to succeed before returning.}
+\end{evidenceblock}
+
+\section{Bounded wait loop and failure behavior}
+\sym{run\_wait\_loop} iterates up to \sym{MAX\_WAIT\_LOOPS} times. If it cannot make progress (no advance) within that bound, it logs \off{wait loop exceeded} and fails.
+
+% %@RS[ID=SRC_RS_RUNNER_WAIT_LOOP_EXCEEDED_V1]
+% % CLAIM="If run_wait_loop returns without advancing, run_loop logs an 'error' tag with message 'wait loop exceeded' and returns failure."
+% % STATE=VERIFIED
+% % NEEDS_RESEARCH=NO
+% % GAPS="None."
+% % NEXT_ACTION="None."
+% % SEARCH_TERMS="run_loop !advanced log_simple(\"error\", \"wait loop exceeded\")"
+% % EVIDENCE="See run_loop() excerpt below showing log_simple(\"error\", \"wait loop exceeded\")."
+% % CONF=2
+% %@END
+
+\begin{evidenceblock}
+{The runtime uses bounded loops controlled by \sym{MAX\_PROMPTS\_PER\_RUN} and \sym{MAX\_WAIT\_LOOPS}; exceeding the wait loop logs an error and returns failure.}
+{include/config.h, src/runner.c}
+{\sym{MAX\_PROMPTS\_PER\_RUN}, \sym{MAX\_WAIT\_LOOPS}, \sym{run\_wait\_loop}, \sym{run\_loop}}
+{\sym{run\_loop} logs \off{error: wait loop exceeded} when \sym{run\_wait\_loop} returns without advancing.}
+\end{evidenceblock}
+
+\subsection*{Code excerpt: wait-loop exceeded failure}
+\begin{lstlisting}
+static int run_loop(const struct ctx *c, struct runtime *rt)
+{
+	...
+	for (size_t step = 1; step < MAX_PROMPTS_PER_RUN; step++) {
+		int advanced = 0;
+		int rc = run_wait_loop(c, rt, &advanced);
+
+		if (rc < 0)
+			return -1;
+		if (rc > 0)
+			return 0;
+		if (!advanced) {
+			rc = log_simple("error", "wait loop exceeded");
+			if (rc != 0)
+				return -1;
+			return -1;
+		}
+	}
+	return 0;
+}
+\end{lstlisting}
+
+The core runtime loop (\sym{run\_loop}) is intentionally structured as a “progress machine”: each iteration should either (a) observe an exit request, (b) advance to another prompt, or (c) fail. The variable \off{advanced} is the local witness for (b): it is only set when \sym{handle\_key} executes an advance path.
+
+In the normal case, \sym{run\_wait\_loop} polls until it reads a key, then \sym{handle\_key} decides whether that key implies an advance. If it does, \off{advanced} becomes true and the outer loop continues to the next \off{step}.
+
+The excerpt also shows the “escape hatch” for pathological behavior: if \sym{run\_wait\_loop} returns without advancing, \sym{run\_loop} writes an explicit error record (\off{tag=error}, \off{msg=wait loop exceeded}) and returns failure. This is the codebase’s defensive posture in miniature: even “should never happen” loops have a bounded way to fail, and they try to leave a forensic breadcrumb in \filep{cram.log} when available.
+
+\sowhat{Most “what does it do when…” questions are answered in \filep{src/runner.c}: the state machine is explicit and the only implicit behavior comes from system calls (select, read, clock).}
+
+%======================================================================
+% CHAPTER 9
+%======================================================================
+\chapter{Wiring and ownership: \filep{src/app.c} and \filep{src/main.c}}
+\chapterroadmap{
+This chapter explains where long-lived state lives and how errors are surfaced to the user.
+}{
+	\item Identify the owner of \sym{struct Session} and scratch buffers.
+	\item Understand error reporting conventions at process boundaries.
+	\item Understand what gets freed (nothing) and why that is OK here.
+}
+
+\section{Static app state}
+\filep{src/app.c} defines a private \sym{struct app} holding:
+\begin{itemize}
+	\item The \sym{struct Session} (parsed model + backing buffer).
+	\item The RNG state.
+	\item Scratch arrays for group and item order.
+\end{itemize}
+This struct is allocated as a single static global (\sym{g\_app}).
+
+\begin{evidenceblock}
+{The program’s long-lived state lives in a single static global \sym{g\_app} that contains the session, RNG, and scratch order arrays.}
+{src/app.c}
+{\sym{struct app}, \sym{g\_app}}
+{The order arrays are sized by \sym{MAX\_GROUPS} and \sym{MAX\_ITEMS\_PER\_GROUP}.}
+\end{evidenceblock}
+
+\section{Error reporting strategy}
+The boundary between “library-ish code” and “CLI user” is mostly at \filep{src/main.c} and \filep{src/app.c}:
+\begin{itemize}
+	\item \filep{src/main.c} prints usage to \off{stdout} and returns distinct exit codes for usage vs usage-print failure.
+	\item \filep{src/app.c} prints parse errors to \off{stderr} using the parser’s error buffer.
+\end{itemize}
+
+\begin{evidenceblock}
+{\filep{src/main.c} prints usage and uses distinct exit codes for usage errors vs usage-print failure.}
+{src/main.c}
+{\sym{print\_usage}, \sym{main}}
+{\sym{main} returns \off{2} if printing usage fails when handling a usage error.}
+\end{evidenceblock}
+
+\begin{evidenceblock}
+{Parse errors are formatted by the parser into an error buffer and printed to stderr by \filep{src/app.c}.}
+{src/app.c, src/parser.c}
+{\sym{setup\_session}, \sym{parse\_session\_file}}
+{\sym{setup\_session} prints \off{"Error: <msg>\\textbackslash n"} on failure.}
+\end{evidenceblock}
+
+\sowhat{If you want to change what the program does, most changes should land in a single module; if you want to change how modules compose, \filep{src/app.c} is the place.}
+
+%======================================================================
+% APPENDIX
+%======================================================================
+\appendix
+\chapter{Practical modification points (without changing the architecture)}
+\purpose{List changes you can make safely, and where you should make them, without turning this codebase into a framework.}
+
+\section{Behavior changes}
+\begin{itemize}
+	\item Change what counts as an “advance” key: edit \sym{is\_advance\_key} in \filep{src/runner.c}.
+	\item Change switching semantics: inspect \sym{update\_expiry} and \sym{handle\_key} in \filep{src/runner.c}.
+	\item Change file format rules: inspect \sym{handle\_line} and \sym{parse\_header\_line} in \filep{src/parser.c}.
+	\item Change logging tags or payloads: inspect \sym{log\_key}, \sym{log\_prompt}, and \sym{log\_group} in \filep{src/log.c}.
+\end{itemize}
+
+\section{Footprint and bounds}
+The correct lever for memory footprint and maximum accepted sizes is \filep{include/config.h}. The constants affect:
+\begin{itemize}
+	\item The size of \sym{struct Session} (buffer/groups/items arrays).
+	\item The maximum iterations of key loops and write loops.
+\end{itemize}
+
+\pitfall{Raising limits}{Increasing \sym{MAX\_...} constants increases static memory and can make the program unusable on constrained machines. The code assumes these are “large but finite”, not “infinite”.}
+
+\end{document}

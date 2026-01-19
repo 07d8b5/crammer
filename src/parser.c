@@ -15,11 +15,11 @@ struct parse_state {
 
 static int set_error(char *err_buf, size_t err_len, const char *msg)
 {
-	if (!assert_ptr(err_buf))
+	if (!validate_ptr(err_buf))
 		return -1;
-	if (!assert_ok(err_len > 0))
+	if (!validate_ok(err_len > 0))
 		return -1;
-	if (!assert_ptr(msg))
+	if (!validate_ptr(msg))
 		return -1;
 
 	int rc = snprintf(err_buf, err_len, "%s", msg);
@@ -32,11 +32,11 @@ static int set_error(char *err_buf, size_t err_len, const char *msg)
 static int set_error_line(char *err_buf, size_t err_len, size_t line_no,
 			  const char *msg)
 {
-	if (!assert_ptr(err_buf))
+	if (!validate_ptr(err_buf))
 		return -1;
-	if (!assert_ok(err_len > 0))
+	if (!validate_ok(err_len > 0))
 		return -1;
-	if (!assert_ptr(msg))
+	if (!validate_ptr(msg))
 		return -1;
 
 	int rc = snprintf(err_buf, err_len, "Line %zu: %s", line_no, msg);
@@ -48,9 +48,9 @@ static int set_error_line(char *err_buf, size_t err_len, size_t line_no,
 
 static size_t trim_left_index(const char *line, size_t line_len)
 {
-	if (!assert_ptr(line))
+	if (!validate_ptr(line))
 		return line_len;
-	if (!assert_ok(line_len <= MAX_LINE_LEN))
+	if (!validate_ok(line_len <= MAX_LINE_LEN))
 		return line_len;
 
 	for (size_t i = 0; i < line_len; i++) {
@@ -62,9 +62,9 @@ static size_t trim_left_index(const char *line, size_t line_len)
 
 static size_t trim_right_index(const char *line, size_t line_len, size_t start)
 {
-	if (!assert_ptr(line))
+	if (!validate_ptr(line))
 		return start;
-	if (!assert_ok(line_len <= MAX_LINE_LEN))
+	if (!validate_ok(line_len <= MAX_LINE_LEN))
 		return start;
 
 	size_t end = line_len;
@@ -81,9 +81,9 @@ static size_t trim_right_index(const char *line, size_t line_len, size_t start)
 
 static int is_blank_or_comment(const char *line, size_t line_len)
 {
-	if (!assert_ptr(line))
+	if (!validate_ptr(line))
 		return 1;
-	if (!assert_ok(line_len <= MAX_LINE_LEN))
+	if (!validate_ok(line_len <= MAX_LINE_LEN))
 		return 1;
 
 	size_t start = trim_left_index(line, line_len);
@@ -96,9 +96,9 @@ static int is_blank_or_comment(const char *line, size_t line_len)
 static int find_pipe_index(const char *line, size_t line_len,
 			   size_t *out_index)
 {
-	if (!assert_ptr(line))
+	if (!validate_ptr(line))
 		return -1;
-	if (!assert_ptr(out_index))
+	if (!validate_ptr(out_index))
 		return -1;
 
 	for (size_t i = 1; i + 1 < line_len && i < MAX_LINE_LEN; i++) {
@@ -114,9 +114,9 @@ static int parse_seconds_value(const char *sec, size_t line_no,
 			       char *err_buf, size_t err_len,
 			       unsigned int *out_seconds)
 {
-	if (!assert_ptr(sec))
+	if (!validate_ptr(sec))
 		return -1;
-	if (!assert_ptr(out_seconds))
+	if (!validate_ptr(out_seconds))
 		return -1;
 
 	errno = 0;
@@ -135,11 +135,11 @@ static int parse_header_line(struct Session *session, char *line,
 			     size_t line_len, size_t line_no,
 			     char *err_buf, size_t err_len)
 {
-	if (!assert_ptr(session))
+	if (!validate_ptr(session))
 		return -1;
-	if (!assert_ptr(line))
+	if (!validate_ptr(line))
 		return -1;
-	if (!assert_ok(line_len <= MAX_LINE_LEN))
+	if (!validate_ok(line_len <= MAX_LINE_LEN))
 		return -1;
 
 	if (line_len < 3 || line[0] != '[' || line[line_len - 1] != ']')
@@ -206,9 +206,9 @@ static int parse_item_line(struct Session *session, struct parse_state *state,
 			   size_t line_start, size_t line_len,
 			   char *err_buf, size_t err_len)
 {
-	if (!assert_ptr(session))
+	if (!validate_ptr(session))
 		return -1;
-	if (!assert_ptr(state))
+	if (!validate_ptr(state))
 		return -1;
 
 	if (!state->has_group)
@@ -236,11 +236,11 @@ static int handle_line(struct Session *session, struct parse_state *state,
 		       char *line, size_t line_len, size_t line_start,
 		       char *err_buf, size_t err_len)
 {
-	if (!assert_ptr(session))
+	if (!validate_ptr(session))
 		return -1;
-	if (!assert_ptr(state))
+	if (!validate_ptr(state))
 		return -1;
-	if (!assert_ptr(line))
+	if (!validate_ptr(line))
 		return -1;
 
 	if (is_blank_or_comment(line, line_len))
@@ -270,11 +270,11 @@ static int handle_line(struct Session *session, struct parse_state *state,
 static int parse_session_buffer(struct Session *session,
 				char *err_buf, size_t err_len)
 {
-	if (!assert_ptr(session))
+	if (!validate_ptr(session))
 		return -1;
-	if (!assert_ptr(err_buf))
+	if (!validate_ptr(err_buf))
 		return -1;
-	if (!assert_ok(err_len > 0))
+	if (!validate_ok(err_len > 0))
 		return -1;
 
 	struct parse_state state;
@@ -326,13 +326,13 @@ static int parse_session_buffer(struct Session *session,
 static int read_file_into_session(const char *path, struct Session *session,
 				  char *err_buf, size_t err_len)
 {
-	if (!assert_ptr(path))
+	if (!validate_ptr(path))
 		return -1;
-	if (!assert_ptr(session))
+	if (!validate_ptr(session))
 		return -1;
-	if (!assert_ptr(err_buf))
+	if (!validate_ptr(err_buf))
 		return -1;
-	if (!assert_ok(err_len > 0))
+	if (!validate_ok(err_len > 0))
 		return -1;
 
 	FILE *fp = fopen(path, "rb");
@@ -354,13 +354,21 @@ static int read_file_into_session(const char *path, struct Session *session,
 	size_t nread = fread(session->buffer, 1, MAX_FILE_BYTES, fp);
 
 	if (ferror(fp)) {
-		(void)fclose(fp);
+		int crc = fclose(fp);
+
+		if (crc != 0)
+			return set_error(err_buf, err_len,
+					 "failed to close file");
 		return set_error(err_buf, err_len, "failed to read file");
 	}
 	int extra = fgetc(fp);
 
 	if (extra != EOF) {
-		(void)fclose(fp);
+		int crc = fclose(fp);
+
+		if (crc != 0)
+			return set_error(err_buf, err_len,
+					 "failed to close file");
 		return set_error(err_buf, err_len,
 				 "file exceeds MAX_FILE_BYTES");
 	}
@@ -375,13 +383,13 @@ static int read_file_into_session(const char *path, struct Session *session,
 int parse_session_file(const char *path, struct Session *session,
 		       char *err_buf, size_t err_len)
 {
-	if (!assert_ptr(path))
+	if (!validate_ptr(path))
 		return -1;
-	if (!assert_ptr(session))
+	if (!validate_ptr(session))
 		return -1;
-	if (!assert_ptr(err_buf))
+	if (!validate_ptr(err_buf))
 		return -1;
-	if (!assert_ok(err_len > 0))
+	if (!validate_ok(err_len > 0))
 		return -1;
 
 	int rc = session_init(session);

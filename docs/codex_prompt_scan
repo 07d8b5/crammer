@@ -1,0 +1,94 @@
+• % @AI_CONTRACT[ID=SRC_TODO_DISCOVERY_PASS_V1]
+  % ROLE="Professional textbook editor + reverse engineering PhD"
+  % TARGET="docs/src.tex (and repo sources only for inspection)"
+  % GOAL="Discover missing evidence/work items and encode them as new TODO placeholders + %@RS tickets
+  in the right locations"
+  % NON_GOALS="Do not close existing TODOs; do not rewrite chapters; do not change numbering/layout; do
+  not add new global macros unless strictly required"
+  % EVIDENCE_RULE="You may add TODOs without evidence, but you must explain exactly what evidence is
+  missing and where to find it in NEXT_ACTION"
+  % OUTPUT_RULES="All new work items must be machine-readable (%@RS) and visible (TODO: ...) where
+  appropriate; minimal diffs; no fabricated specifics"
+  % DONE_WHEN="At least N (default 5–10) high-value missing pieces are captured as %@RS + TODOs with
+  precise search terms and next steps"
+  % @END
+  %
+  % TASK PROMPT (paste to the model)
+  % You are a professional textbook editor and reverse engineering PhD. You are maintaining an AI-
+  written source walkthrough in docs/src.tex.
+  %
+  % Your job is NOT to fix existing TODOs. Your job is to look for missing TODOs that should exist—
+  places where docs/src.tex makes or implies a
+  % claim about the code, but the reader would reasonably expect primary evidence, a call site, a
+  snippet, a state-machine/table, or a verification
+  % procedure, and it’s not present.
+  %
+  % Deliverables you must add to docs/src.tex:
+  % 1) New %@RS[...] tickets (machine-readable) for each missing item.
+  % 2) A matching TODO: placeholder:
+  %    - If it is meant to become a code excerpt, put the TODO inside a lstlisting (or verbatim) block
+  near the nearest existing “Code excerpt”
+  %      area for that chapter.
+  %    - Otherwise, a short inline TODO: comment is fine.
+  % 3) A one-paragraph “intent” note (reader-facing prose or \draftnote) if the missing item is
+  critical to correctness or reader trust.
+  %
+  % Priority (highest first):
+  % - Runner semantics that are easy to misunderstand:
+  %   - pending-switch (expiry vs next key), blocking behavior with timeout=-1, exit path on Ctrl+C,
+  bounded loop failure path
+  % - Parser invariants:
+  %   - “group must have at least one item”, item-before-header behavior, trimming rules, CRLF
+  normalization, size limit enforcement locations
+  % - RNG correctness:
+  %   - unbiased range threshold logic, retry bound behavior, shuffle loop bounds and whether they
+  implement Fisher–Yates correctly
+  % - Terminal behavior:
+  %   - termios flags, read/timeout semantics, EINTR handling, guarantee of terminal restoration
+  % - Logging behavior:
+  %   - best-effort logging policy, open failure warning path, line format, tag taxonomy and call sites
+  % - Cross-cutting constraints:
+  %   - which bounds exist to prevent infinite loops, and where each is enforced (MAX_* mapping table)
+  % - Verification procedures:
+  %   - concrete “how to validate” steps a reader can run locally (without adding new tooling)
+  %
+  % Hard constraints:
+  % - Do not invent any file paths, symbol names, offsets, or constants. If unknown, write
+  UNKNOWN_PATH/UNKNOWN_SYMBOL in the RS and explain how to discover them.
+  % - Do not add page breaks or change chapter/section numbering.
+  % - Do not remove or rename existing %@RS IDs or any existing EX* labels (if present).
+  % - Keep the document readable: prefer 5–10 high-impact items over dozens of low-value TODOs.
+  %
+  % Workflow you must follow:
+  % 1) Scan docs/src.tex for:
+  %    - strong claims (“is”, “must”, “only”, “always”, “never”, “guarantees”, “cannot”, etc.)
+  %    - sections that promise “exact behavior” without a supporting excerpt/evidenceblock
+  %    - places that mention bounds, invariants, or failure modes without pointing to the exact check
+  % 2) For each discovered gap, decide if it warrants:
+  %    - a new %@RS ticket (yes if it affects correctness, reproducibility, or reader trust)
+  %    - a new excerpt placeholder (yes if the gap must be proven via code)
+  %    - a table/diagram placeholder (yes if a structure/state machine/bounds map is discussed)
+  % 3) Insert each new %@RS immediately above the paragraph it governs, and place the TODO: placeholder
+  in the nearest appropriate “Code excerpt”
+  %    area (or create an unnumbered \subsection*{Code excerpt: ...} locally if needed, but do not
+  restructure).
+  % 4) Each new %@RS must include:
+  %    - CLAIM: one sentence
+  %    - STATE: UNVERIFIED
+  %    - NEEDS_RESEARCH: YES
+  %    - GAPS: what’s missing
+  %    - NEXT_ACTION: an exact repo navigation action (e.g., “find callers of log_shuffle”, “search for
+  MAX_WAIT_LOOPS uses”, “inspect handle_line branches”)
+  %    - SEARCH_TERMS: concrete tokens usable with rg
+  %    - EVIDENCE: placeholder if not yet known
+  %    - CONF: 0–2 depending on whether partial evidence exists
+  %
+  % Minimum output:
+  % - Add at least 7 new %@RS tickets and their corresponding TODO placeholders.
+  % - Ensure no ticket is vague: NEXT_ACTION must be actionable and local to the repo.
+  %
+  % You must implement the edits (use apply_patch) and finish with a short summary listing:
+  % - Each new RS ID
+  % - The section it was added to
+  % - The exact TODO/excerpt/table it expects to be filled later
+

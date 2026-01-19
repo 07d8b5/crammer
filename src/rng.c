@@ -17,9 +17,7 @@ static u64 mix64(u64 x)
 
 int rng_init(struct Rng *rng)
 {
-	if (!assert_ptr(rng))
-		return -1;
-	if (!assert_ok(RNG_RETRY_LIMIT > 0))
+	if (!validate_ptr(rng))
 		return -1;
 
 	u64 seed = 0;
@@ -28,8 +26,10 @@ int rng_init(struct Rng *rng)
 	if (fd >= 0) {
 		size_t want = sizeof(seed);
 		ssize_t got = read(fd, &seed, want);
+		int rc = close(fd);
 
-		(void)close(fd);
+		if (rc != 0)
+			seed = 0;
 		if (got != (ssize_t)want)
 			seed = 0;
 	}
@@ -51,7 +51,7 @@ int rng_init(struct Rng *rng)
 
 u64 rng_next_u64(struct Rng *rng)
 {
-	if (!assert_ptr(rng))
+	if (!validate_ptr(rng))
 		return 0;
 	if (!assert_ok(rng->state != 0))
 		return 0;
@@ -67,9 +67,9 @@ u64 rng_next_u64(struct Rng *rng)
 
 size_t rng_range(struct Rng *rng, size_t upper)
 {
-	if (!assert_ptr(rng))
+	if (!validate_ptr(rng))
 		return 0;
-	if (!assert_ok(upper > 0))
+	if (!validate_ok(upper > 0))
 		return 0;
 
 	u64 threshold = (u64)(-upper) % upper;
@@ -85,19 +85,15 @@ size_t rng_range(struct Rng *rng, size_t upper)
 
 int rng_shuffle_groups(struct Rng *rng, size_t *values, size_t count)
 {
-	if (!assert_ptr(rng))
+	if (!validate_ptr(rng))
 		return -1;
-	if (!assert_ptr(values))
+	if (!validate_ptr(values))
 		return -1;
-	if (!assert_ok(count <= MAX_GROUPS))
-		return -1;
-	if (!assert_ok(MAX_GROUPS > 1))
+	if (!validate_ok(count <= MAX_GROUPS))
 		return -1;
 
 	if (count < 2)
 		return 0;
-	if (count > MAX_GROUPS)
-		count = MAX_GROUPS;
 	for (size_t i = 1; i < MAX_GROUPS; i++) {
 		if (i >= count)
 			break;
@@ -112,19 +108,15 @@ int rng_shuffle_groups(struct Rng *rng, size_t *values, size_t count)
 
 int rng_shuffle_items(struct Rng *rng, size_t *values, size_t count)
 {
-	if (!assert_ptr(rng))
+	if (!validate_ptr(rng))
 		return -1;
-	if (!assert_ptr(values))
+	if (!validate_ptr(values))
 		return -1;
-	if (!assert_ok(count <= MAX_ITEMS_PER_GROUP))
-		return -1;
-	if (!assert_ok(MAX_ITEMS_PER_GROUP > 1))
+	if (!validate_ok(count <= MAX_ITEMS_PER_GROUP))
 		return -1;
 
 	if (count < 2)
 		return 0;
-	if (count > MAX_ITEMS_PER_GROUP)
-		count = MAX_ITEMS_PER_GROUP;
 	for (size_t i = 1; i < MAX_ITEMS_PER_GROUP; i++) {
 		if (i >= count)
 			break;

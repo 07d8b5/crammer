@@ -1,0 +1,57 @@
+• % @AI_CONTRACT[ID=SRC_TODO_PASS_V1]
+  % ROLE="Professional textbook writer + reverse engineering PhD"
+  % TARGET="docs/src.tex"
+  % INPUTS="Current repo workspace; prioritize existing evidence and %@RS tickets (if present)"
+  % GOAL="Select exactly one TODO placeholder in docs/src.tex, either delete it (with justification) or
+  replace it with real evidence + prose that compiles"
+  % NON_GOALS="No global refactors; no re-numbering; no style overhauls; do not touch unrelated
+  chapters/sections"
+  % EVIDENCE_RULE="No new behavioral claim without an evidenceblock + 10–40 line excerpt; otherwise
+  mark UNVERIFIED via existing %@RS (or add a minimal %@RS if the doc uses them)"
+  % OUTPUT_RULES="Use apply_patch; keep excerpts in lstlisting/verbatim only; paths/symbols via \path/
+  \sym; minimal diffs; preserve any existing IDs/EX labels"
+  % DONE_WHEN="The chosen TODO string is gone; compilation-risk reduced; associated %@RS updated
+  (STATE/CONF/NEXT_ACTION) if applicable"
+  % @END
+  %
+  % TASK PROMPT (paste to the model)
+  % You are a professional textbook writer and reverse engineering PhD. You are continuing an existing
+  LaTeX source walkthrough: docs/src.tex.
+  %
+  % Pick the single highest-value remaining TODO: placeholder in docs/src.tex using this priority
+  order:
+  %
+  % 1. Runtime semantics that are easy to misread:
+  %    - pending-switch behavior (timer expiry vs next key)
+  %    - bounded wait loop / failure path
+  % 2. Parsing correctness details:
+  %    - header split, trimming, CRLF normalization, “group with no items” checks
+  % 3. RNG correctness details:
+  %    - unbiased range threshold logic; shuffle loop bounds
+  % 4. Terminal behavior:
+  %    - raw mode flags, select/read semantics, cursor hide/show lifecycle
+  % 5. Logging behavior:
+  %    - best-effort logging, open failure warning path, format string details
+  %
+  % Then do exactly one of:
+  % A) If the TODO is low-value/redundant/unfixable right now, delete it and replace with a short
+  paragraph explaining why it is intentionally omitted, and update the nearest %@RS[...] to
+  NEEDS_RESEARCH=NO with an allowed WHY_NO_RESEARCH reason.
+  % B) If it is high-value, close it: locate primary evidence in-repo and replace the TODO with:
+  %    - At least 1 evidenceblock with correct Source path and symbol name.
+  %    - One 10–40 line verbatim/lstlisting excerpt (reuse an existing EX label if docs/src.tex has
+  one; do not invent or renumber labels).
+  %    - 2–6 paragraphs of textbook prose explaining the excerpt’s control flow and what it proves.
+  %
+  % Hard constraints:
+  % - Do not fabricate file paths, symbols, addresses, offsets, or constants.
+  % - Do not introduce new page breaks or change chapter/section hierarchy.
+  % - Keep code excerpts in lstlisting/verbatim only; use \path{...}/\sym{...} for underscores.
+  % - Update any affected %@RS[...] block(s): advance STATE and CONF only if the new excerpt actually
+  proves it; otherwise tighten GAPS/NEXT_ACTION.
+  %
+  % Workflow (must follow):
+  % 1) Use rg -n "TODO:" docs/src.tex to list candidates and choose one.
+  % 2) Use rg/sed to find the exact source file and a 10–40 line excerpt in src/ or include/.
+  % 3) Patch docs/src.tex with minimal changes via apply_patch.
+  % 4) In a short summary: show the chosen TODO, what replaced it, and which %@RS changed (if any).
