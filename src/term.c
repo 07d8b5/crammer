@@ -36,11 +36,15 @@ static int write_all(const char* buf, size_t len) {
 }
 
 int term_enter_raw(struct TermState* state, char* err_buf, size_t err_len) {
-  if (!assert_ptr(state))
+  if (!validate_ptr(state))
     return -1;
-  if (!assert_ptr(err_buf))
+  if (!validate_ptr(err_buf))
     return -1;
-  if (!assert_ok(err_len > 0))
+  if (!validate_ok(err_len > 0))
+    return -1;
+  if (!assert_ok(state->active == 0 || state->active == 1))
+    return -1;
+  if (!assert_ok(state->active == 0))
     return -1;
 
   int rc = tcgetattr(STDIN_FILENO, &state->original);
