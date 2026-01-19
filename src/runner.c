@@ -326,7 +326,7 @@ static int read_key(const struct ctx *c, const struct runtime *rt,
 		return -1;
 	if (!validate_ptr(key_out))
 		return -1;
-	if (!validate_ok(remaining_ms <= 86400000ULL))
+	if (!validate_ok(remaining_ms <= MAX_GROUP_MILLISECONDS))
 		return -1;
 
 	int timeout = rt->pending_switch ? -1 : (int)remaining_ms;

@@ -124,7 +124,7 @@ static int parse_seconds_value(const char *sec, size_t line_no,
 	unsigned long secs = strtoul(sec, &endptr, 10);
 
 	if (errno != 0 || !endptr || *endptr != '\0' || secs < 1 ||
-	    secs > 86400)
+	    secs > MAX_GROUP_SECONDS)
 		return set_error_line(err_buf, err_len, line_no,
 				      "invalid seconds value");
 	*out_seconds = (unsigned int)secs;
