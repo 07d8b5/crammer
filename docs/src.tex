@@ -253,6 +253,27 @@ The repository defines its “maximum universe” in \filep{include/config.h}. T
 {\filep{include/model.h} embeds the buffer/groups/items arrays directly in \sym{struct Session}.}
 \end{evidenceblock}
 
+% %@RS[ID=SRC_RS_CONFIG_MAX_GROUP_SECONDS_V1]
+% % CLAIM="The maximum allowed group timer duration is configured by MAX_GROUP_SECONDS; the parser enforces it when parsing headers and the runner relies on it for time computations and sanity bounds."
+% % STATE=UNVERIFIED
+% % NEEDS_RESEARCH=YES
+% % GAPS="Need excerpt from include/config.h defining MAX_GROUP_SECONDS/MAX_GROUP_MILLISECONDS and the compile-time consistency check; need excerpts from src/parser.c parse_seconds_value and src/runner.c (update_group_timer/read_key) showing the enforcement/assumptions."
+% % NEXT_ACTION="Extract a 10–40 line excerpt from include/config.h around MAX_GROUP_SECONDS/MAX_GROUP_MILLISECONDS and the related static_assert; then extract short excerpts from src/parser.c parse_seconds_value (secs > MAX_GROUP_SECONDS) and src/runner.c update_group_timer/read_key (seconds->ms and remaining_ms bound)."
+% % SEARCH_TERMS="MAX_GROUP_SECONDS MAX_GROUP_MILLISECONDS static_assert_max_group_ms secs > MAX_GROUP_SECONDS rt->group_end = now + (u64)seconds * 1000ULL remaining_ms <= MAX_GROUP_MILLISECONDS"
+% % EVIDENCE="TODO: EX excerpt(s) from include/config.h, src/parser.c, src/runner.c"
+% % CONF=0
+% %@END
+
+\subsection*{Code excerpt: max group duration bounds (TODO)}
+\begin{lstlisting}
+/* TODO: EXCERPT (10–40 lines) showing MAX_GROUP_SECONDS/MAX_GROUP_MILLISECONDS and their enforcement:
+ * - include/config.h: MAX_GROUP_SECONDS + derived MAX_GROUP_MILLISECONDS + static assert
+ * - src/parser.c: secs > MAX_GROUP_SECONDS
+ * - src/runner.c: remaining_ms <= MAX_GROUP_MILLISECONDS and/or group_end computation
+ * SEARCH_TERMS: MAX_GROUP_SECONDS MAX_GROUP_MILLISECONDS static_assert_max_group_ms secs > MAX_GROUP_SECONDS remaining_ms <= MAX_GROUP_MILLISECONDS
+ */
+\end{lstlisting}
+
 \section{Validation vs assertion}
 \filep{include/config.h} provides tiny helpers that appear throughout the source:
 \begin{itemize}
@@ -486,6 +507,55 @@ The parser distinguishes:
 	\item Comments: lines whose first non-whitespace character is \off{\#}.
 \end{itemize}
 
+% %@RS[ID=SRC_RS_PARSER_ITEM_BEFORE_HEADER_V1]
+% % CLAIM="If the parser encounters a non-blank, non-comment item line before any group header, it fails with the line-anchored error 'item before any group header'."
+% % STATE=VERIFIED
+% % NEEDS_RESEARCH=NO
+% % GAPS="None."
+% % NEXT_ACTION="None."
+% % SEARCH_TERMS="item before any group header !state->has_group parse_item_line handle_line return set_error_line"
+% % EVIDENCE="See excerpt below showing parse_item_line() rejecting !state->has_group and handle_line() dispatch for non-header lines."
+% % CONF=2
+% %@END
+
+\subsection*{Code excerpt: item before header rejection}
+\begin{lstlisting}
+static int parse_item_line(struct Session *session, struct parse_state *state,
+			   size_t line_start, size_t line_len,
+			   char *err_buf, size_t err_len)
+{
+	...
+	if (!state->has_group)
+		return set_error_line(err_buf, err_len, state->line_no,
+				      "item before any group header");
+	...
+}
+
+static int handle_line(struct Session *session, struct parse_state *state,
+		       char *line, size_t line_len, size_t line_start,
+		       char *err_buf, size_t err_len)
+{
+	...
+	if (is_blank_or_comment(line, line_len))
+		return 0;
+	if (line[0] == '[') {
+		...
+		state->has_group = 1;
+		return 0;
+	}
+	return parse_item_line(session, state, line_start, line_len,
+			       err_buf, err_len);
+}
+\end{lstlisting}
+
+This excerpt answers a basic file-format question: may a session file contain items before the first header? The answer is no, and the failure mode is explicit and line-anchored.
+
+The enforcement lives in \sym{parse\_item\_line}, not in the line classifier. That split is intentional: \sym{handle\_line} remains a small dispatcher (“blank/comment”, “header”, “otherwise item”), while \sym{parse\_item\_line} enforces the structural precondition \off{state->has\_group}.
+
+The error string (\off{"item before any group header"}) is produced via \sym{set\_error\_line}, which includes the current line number. That makes malformed input self-diagnosing: the user can jump straight to the offending line instead of inferring structure from downstream behavior.
+
+Finally, note what this choice buys the runtime. If parsing succeeds, the runner never needs to consider “orphan items”: every stored item is associated with some group by construction, and the only group-related edge cases left are those already checked elsewhere (such as empty groups, which are rejected separately).
+
 \begin{evidenceblock}
 {Blank lines and comment lines are ignored; a comment line is one whose first non-space character is \off{\#}.}
 {src/parser.c}
@@ -526,6 +596,25 @@ This function defines the parser’s “ignorable line” policy. First, it trea
 The core rule is the \sym{trim\_left\_index} call. It computes the first non-whitespace position in the line. If the entire line is whitespace (\off{start >= line\_len}), the function returns true: it is blank.
 
 Otherwise the rule is a single character test: if the first non-space byte is \off{\#}, the line is a comment. Everything else is “content” and must be interpreted either as a header or as an item line. This “only if first non-space is \#” detail matters: \off{\#} in the middle of a prompt is not special; it is preserved as part of the item text.
+
+% %@RS[ID=SRC_RS_PARSER_ITEM_STORAGE_NO_TRIM_V1]
+% % CLAIM="The parser preserves item lines exactly as scanned (minus CRLF normalization): it stores item offsets/lengths without trimming leading/trailing whitespace."
+% % STATE=UNVERIFIED
+% % NEEDS_RESEARCH=YES
+% % GAPS="Need excerpt showing parse_item_line storing offset/length directly (line_start/line_len) and that trimming helpers are not applied to item content."
+% % NEXT_ACTION="Extract a 10–40 line excerpt from src/parser.c covering parse_item_line() and the handle_line() call that passes line_start/line_len, and confirm CRLF normalization happens earlier in parse_session_buffer()."
+% % SEARCH_TERMS="static int parse_item_line item->offset = (u32)line_start item->length = (u32)line_len handle_line return parse_item_line session->item_count++ group->item_count++"
+% % EVIDENCE="TODO: EX excerpt from src/parser.c parse_item_line"
+% % CONF=0
+% %@END
+
+\subsection*{Code excerpt: item storage (no trimming) (TODO)}
+\begin{lstlisting}
+/* TODO: EXCERPT (10–40 lines) from src/parser.c parse_item_line():
+ * show: item->offset/length assigned from line_start/line_len and counters incremented.
+ * SEARCH_TERMS: item->offset = (u32)line_start item->length = (u32)line_len session->item_count++ group->item_count++
+ */
+\end{lstlisting}
 
 % %@RS[ID=SRC_RS_PARSER_TRIM_FUNCTIONS_EXCERPT_V1]
 % % CLAIM="Whitespace trimming is implemented by trim_left_index (first non-space) and trim_right_index (exclusive end index after removing trailing spaces, but never before start), both bounded by MAX_LINE_LEN."
@@ -682,23 +771,23 @@ Headers require a second kind of split. \sym{parse\_header\_line} overwrites the
 This mutation is why the persistent session model stores offsets and lengths (\sym{struct Group} and \sym{struct Item}) rather than pointers to C strings: after parsing, \sym{session->buffer} is no longer a single NUL-terminated text blob, but a blob with embedded terminators. The runtime therefore uses offsets/lengths to print exact prompt bytes (including any internal punctuation) rather than depending on C-string semantics.
 
 \section{Seconds parsing}
-\sym{parse\_seconds\_value} parses seconds as base-10 via \sym{strtoul} and rejects values outside \off{[1, 86400]}.
+\sym{parse\_seconds\_value} parses seconds as base-10 via \sym{strtoul} and rejects values outside \off{[1, MAX\_GROUP\_SECONDS]}. (The default is one day, but the cap is tunable via \sym{MAX\_GROUP\_SECONDS} in \filep{include/config.h}.)
 
 \begin{evidenceblock}
-{The per-group seconds value must parse as a decimal integer in the range \off{1..86400}.}
+{The per-group seconds value must parse as a decimal integer in the range \off{1..MAX\_GROUP\_SECONDS}.}
 {src/parser.c}
 {\sym{parse\_seconds\_value}}
 {\sym{parse\_seconds\_value} checks \sym{errno}, \sym{endptr}, and bounds.}
 \end{evidenceblock}
 
 % %@RS[ID=SRC_RS_PARSER_SECONDS_PARSE_EXCERPT_V1]
-% % CLAIM="Seconds are parsed with strtoul, require full-string consumption, and are rejected if outside 1..86400."
+% % CLAIM="Seconds are parsed with strtoul, require full-string consumption, and are rejected if outside 1..MAX_GROUP_SECONDS."
 % % STATE=VERIFIED
 % % NEEDS_RESEARCH=NO
 % % GAPS="None."
 % % NEXT_ACTION="None."
-% % SEARCH_TERMS="parse_seconds_value strtoul secs < 1 secs > 86400 endptr != '\\0' errno"
-% % EVIDENCE="See the parse_seconds_value() excerpt below showing errno/endptr validation and the 1..86400 bounds."
+% % SEARCH_TERMS="parse_seconds_value strtoul secs < 1 secs > MAX_GROUP_SECONDS endptr != '\\0' errno"
+% % EVIDENCE="See the parse_seconds_value() excerpt below showing errno/endptr validation and the MAX_GROUP_SECONDS bound."
 % % CONF=2
 % %@END
 
@@ -714,7 +803,7 @@ static int parse_seconds_value(const char *sec, size_t line_no,
 	unsigned long secs = strtoul(sec, &endptr, 10);
 
 	if (errno != 0 || !endptr || *endptr != '\0' || secs < 1 ||
-	    secs > 86400)
+	    secs > MAX_GROUP_SECONDS)
 		return set_error_line(err_buf, err_len, line_no,
 				      "invalid seconds value");
 	*out_seconds = (unsigned int)secs;
@@ -726,7 +815,7 @@ This function is a tight “parse and validate” gate. It uses \sym{strtoul} to
 
 First, it enforces clean parsing: \sym{errno} must remain zero, and \sym{endptr} must point at the terminating NUL byte (\off{*endptr == '\\0'}). That second condition is what rejects strings like \off{60s} or \off{10 20}: the parse must consume the entire seconds substring produced by header splitting and trimming.
 
-Second, it enforces a semantic range: values must be within \off{1..86400}. This makes a group timer always positive and prevents absurdly long timers from silently becoming accepted “configuration”. When the check fails, the error is anchored to the current line number via \sym{set\_error\_line} and the caller gets a specific message: \off{"invalid seconds value"}.
+Second, it enforces a semantic range: values must be within \off{1..MAX\_GROUP\_SECONDS}. This makes a group timer always positive, and it prevents extremely long timers unless you intentionally raise \sym{MAX\_GROUP\_SECONDS}. When the check fails, the error is anchored to the current line number via \sym{set\_error\_line} and the caller gets a specific message: \off{"invalid seconds value"}.
 
 \section{Enforced limits}
 Parsing rejects files that exceed configured bounds: maximum file bytes, maximum line length, maximum number of groups, maximum total items, and maximum items per group.
@@ -1033,6 +1122,25 @@ The remaining settings establish the “single-byte polling” contract used by 
 {On restore failure it clears \sym{state->active} and returns error.}
 \end{evidenceblock}
 
+% %@RS[ID=SRC_RS_TERM_RESTORE_IDEMPOTENT_EXCERPT_V1]
+% % CLAIM="term_restore returns success immediately when state->active is false; otherwise it calls tcsetattr and clears state->active regardless of success/failure."
+% % STATE=UNVERIFIED
+% % NEEDS_RESEARCH=YES
+% % GAPS="Need excerpt showing the early return when !state->active and the 'state->active = 0' assignments on both the error and success paths."
+% % NEXT_ACTION="Extract a 10–40 line excerpt from src/term.c covering term_restore(), including the active-flag checks, tcsetattr call, and state->active updates."
+% % SEARCH_TERMS="int term_restore state->active if (!state->active) return 0 tcsetattr state->active = 0"
+% % EVIDENCE="TODO: EX excerpt from src/term.c term_restore"
+% % CONF=0
+% %@END
+
+\subsection*{Code excerpt: \sym{term\_restore} idempotency (TODO)}
+\begin{lstlisting}
+/* TODO: EXCERPT (10–40 lines) from src/term.c term_restore():
+ * show: if (!state->active) return 0; and state->active cleared on both error and success.
+ * SEARCH_TERMS: int term_restore if (!state->active) return 0 tcsetattr state->active = 0
+ */
+\end{lstlisting}
+
 \section{Screen control}
 The module provides cursor hide/show and a clear-screen operation by writing ANSI escape sequences to \off{STDOUT}.
 
@@ -1045,22 +1153,52 @@ The module provides cursor hide/show and a clear-screen operation by writing ANS
 
 % %@RS[ID=SRC_RS_TERM_WRITE_ALL_BOUNDED_LOOP_V1]
 % % CLAIM="write_all retries write(STDOUT) up to MAX_WRITE_LOOPS, handles EINTR by retrying, and fails if it cannot write the full buffer."
-% % STATE=UNVERIFIED
-% % NEEDS_RESEARCH=YES
-% % GAPS="Need excerpt showing the bounded loop, EINTR handling, and the final len!=0 failure."
-% % NEXT_ACTION="Extract a 10–40 line excerpt from src/term.c covering write_all()."
+% % STATE=VERIFIED
+% % NEEDS_RESEARCH=NO
+% % GAPS="None."
+% % NEXT_ACTION="None."
 % % SEARCH_TERMS="static int write_all MAX_WRITE_LOOPS errno == EINTR len != 0"
-% % EVIDENCE="TODO: EX excerpt from src/term.c write_all"
-% % CONF=0
+% % EVIDENCE="See write_all() excerpt below showing bounded writes, EINTR retry, and len!=0 failure."
+% % CONF=2
 % %@END
 
-\subsection*{Code excerpt: bounded \sym{write\_all} (TODO)}
+\subsection*{Code excerpt: bounded \sym{write\_all}}
 \begin{lstlisting}
-/* TODO: EXCERPT (10–40 lines) from src/term.c write_all():
- * show MAX_WRITE_LOOPS loop, errno==EINTR retry, and len!=0 -> failure.
- * SEARCH_TERMS: static int write_all MAX_WRITE_LOOPS errno == EINTR
- */
+static int write_all(const char *buf, size_t len)
+{
+	if (!assert_ptr(buf))
+		return -1;
+	if (!assert_ok(len <= MAX_LINE_LEN))
+		return -1;
+
+	for (size_t i = 0; i < MAX_WRITE_LOOPS; i++) {
+		if (len == 0)
+			break;
+		ssize_t n = write(STDOUT_FILENO, buf, len);
+
+		if (n < 0) {
+			if (errno == EINTR)
+				continue;
+			return -1;
+		}
+		if (n == 0)
+			break;
+		buf += (size_t)n;
+		len -= (size_t)n;
+	}
+	if (len != 0)
+		return -1;
+	return 0;
+}
 \end{lstlisting}
+
+\sym{write\_all} is a small but critical “best effort, but bounded” primitive. It attempts to write an entire buffer to \off{STDOUT} even if the kernel performs a short write, by advancing \sym{buf} and decrementing \sym{len} after each successful call.
+
+The safety valve is the outer bound: the loop runs at most \sym{MAX\_WRITE\_LOOPS} iterations. This prevents pathological behavior in the face of repeated interruptions or unexpected \off{write(2)} behavior. In the normal case—escape sequences that fit in a few bytes—this bound is never approached.
+
+Interruption handling is explicit. If \off{write} fails with \off{EINTR}, the function retries the same write without consuming any bytes. Any other error is treated as fatal.
+
+Finally, the postcondition \off{len != 0 -> -1} makes the contract crisp: success means “every byte was written”, and failure means “some bytes may not have been written.” The screen-control functions build on this by propagating failures upward; they do not try to partially render escape sequences, which keeps terminal state changes atomic from the program’s point of view.
 
 \section{Timed key reads}
 \sym{term\_read\_key\_timeout} waits for readability with \sym{select} and then reads one byte from \off{STDIN}.
@@ -1117,22 +1255,50 @@ if (n == 1) {
 
 % %@RS[ID=SRC_RS_TERM_EINTR_RETURNS_ZERO_V1]
 % % CLAIM="term_read_key_timeout treats EINTR as 'no key yet' (returns 0) both for select() and for read()."
-% % STATE=UNVERIFIED
-% % NEEDS_RESEARCH=YES
-% % GAPS="Need excerpt showing (ready<0 && errno==EINTR) return 0, and (n<0 && errno==EINTR) return 0."
-% % NEXT_ACTION="Extract a 10–40 line excerpt from src/term.c term_read_key_timeout() covering the select() error branch and the read() EINTR branch."
+% % STATE=VERIFIED
+% % NEEDS_RESEARCH=NO
+% % GAPS="None."
+% % NEXT_ACTION="None."
 % % SEARCH_TERMS="ready < 0 errno == EINTR return 0 n < 0 && errno == EINTR"
-% % EVIDENCE="TODO: EX excerpt from src/term.c term_read_key_timeout EINTR handling"
-% % CONF=0
+% % EVIDENCE="See the term_read_key_timeout() excerpt below showing EINTR mapped to return 0 for both select() and read()."
+% % CONF=2
 % %@END
 
-\subsection*{Code excerpt: EINTR semantics (TODO)}
+\subsection*{Code excerpt: EINTR semantics}
 \begin{lstlisting}
-/* TODO: EXCERPT (10–40 lines) from src/term.c term_read_key_timeout():
- * show select() EINTR -> return 0 and read() EINTR -> return 0.
- * SEARCH_TERMS: if (errno == EINTR) return 0
- */
+int term_read_key_timeout(int timeout_ms, int *out_key)
+{
+	...
+	int ready = select(STDIN_FILENO + 1, &readfds, NULL, NULL, tv_ptr);
+
+	if (ready < 0) {
+		if (errno == EINTR)
+			return 0;
+		return -1;
+	}
+	if (ready == 0)
+		return 0;
+
+	unsigned char ch = 0;
+	ssize_t n = read(STDIN_FILENO, &ch, 1);
+
+	if (n == 1) {
+		*out_key = (int)ch;
+		return 1;
+	}
+	if (n < 0 && errno == EINTR)
+		return 0;
+	return -1;
+}
 \end{lstlisting}
+
+\sym{term\_read\_key\_timeout} uses a tri-state return convention: \off{1} means “a key was read”, \off{0} means “no key yet”, and \off{-1} means “hard error”. The EINTR handling in this excerpt shows that interruptions are deliberately mapped into the “no key yet” state.
+
+On the \sym{select} side, \off{ready < 0} normally indicates a failure. But if \sym{errno == EINTR}, the function returns \off{0} instead of propagating an error. In other words, a signal interruption does not terminate the run or force a retry loop here; it simply behaves like an immediate timeout.
+
+The same policy is applied to the \sym{read} call. If the input read is interrupted (\off{n < 0 \&\& errno == EINTR}), the function again returns \off{0}. This makes the read side consistent with the wait side: neither stage treats EINTR as exceptional.
+
+That choice is practical for terminal programs. It keeps the caller’s control flow simple—call \sym{term\_read\_key\_timeout}, and treat \off{0} uniformly as “continue waiting/polling”—and it avoids accidentally turning transient signal noise into user-visible failures.
 
 \sowhat{The terminal module is carefully scoped: it does not parse escape sequences or implement a UI framework; it only offers the primitives needed by the runtime loop.}
 
@@ -1289,6 +1455,17 @@ int log_prompt(size_t group_index, size_t item_index)
 {The format string is \texttt{"\%llu.\%03llu [\%s] \%s\textbackslash n"}.}
 \end{evidenceblock}
 
+% %@RS[ID=SRC_RS_LOG_WRITE_CLOCK_REALTIME_V1]
+% % CLAIM="log_write timestamps using clock_gettime(CLOCK_REALTIME) and writes the formatted line to the log fd using a bounded EINTR-retrying loop."
+% % STATE=UNVERIFIED
+% % NEEDS_RESEARCH=YES
+% % GAPS="Need excerpt showing clock_gettime(CLOCK_REALTIME, &ts) error handling and the MAX_WRITE_LOOPS write() loop with EINTR retry."
+% % NEXT_ACTION="Extract a 10–40 line excerpt from src/log.c log_write() covering the clock_gettime call and the write loop (including errno==EINTR continue)."
+% % SEARCH_TERMS="static int log_write clock_gettime(CLOCK_REALTIME MAX_WRITE_LOOPS errno == EINTR write(g_log_fd"
+% % EVIDENCE="TODO: EX excerpt from src/log.c log_write clock_gettime/write loop"
+% % CONF=0
+% %@END
+
 \subsection*{Code excerpt: formatting a log line}
 \begin{lstlisting}
 u64 sec = (u64)ts.tv_sec;
@@ -1298,6 +1475,14 @@ char line[256];
 rc = snprintf(line, sizeof(line), "%llu.%03llu [%s] %s\n",
 	      (unsigned long long)sec,
 	      (unsigned long long)ms, tag, msg);
+\end{lstlisting}
+
+\subsection*{Code excerpt: clock\_gettime and bounded write (TODO)}
+\begin{lstlisting}
+/* TODO: EXCERPT (10–40 lines) from src/log.c log_write():
+ * show: clock_gettime(CLOCK_REALTIME, &ts) and the MAX_WRITE_LOOPS write() loop with errno==EINTR retry.
+ * SEARCH_TERMS: clock_gettime(CLOCK_REALTIME MAX_WRITE_LOOPS errno == EINTR write(g_log_fd
+ */
 \end{lstlisting}
 
 \sowhat{Logging is designed to never prevent the program from running; it is for post-mortem understanding and auditing, not correctness.}
@@ -1337,6 +1522,25 @@ Group timing uses \off{CLOCK\_MONOTONIC} measured in milliseconds; logging times
 {\sym{now\_ms}, \sym{update\_group\_timer}}
 {\sym{update\_group\_timer} sets \sym{rt->group\_end = now + seconds*1000}.}
 \end{evidenceblock}
+
+% %@RS[ID=SRC_RS_RUNNER_GROUP_END_COMPUTATION_V1]
+% % CLAIM="update_group_timer reads the current group’s seconds duration and sets rt->group_end to now_ms() + seconds*1000, relying on the parser’s MAX_GROUP_SECONDS bound to keep durations sane."
+% % STATE=UNVERIFIED
+% % NEEDS_RESEARCH=YES
+% % GAPS="Need excerpt showing update_group_timer reading group->seconds, calling now_ms, and setting rt->group_end = now + (u64)seconds * 1000ULL."
+% % NEXT_ACTION="Extract a 10–40 line excerpt from src/runner.c covering update_group_timer(), including the seconds read, now_ms call, and group_end assignment."
+% % SEARCH_TERMS="static int update_group_timer seconds = c->session->groups[rt->group_index].seconds now_ms rt->group_end = now + (u64)seconds * 1000ULL"
+% % EVIDENCE="TODO: EX excerpt from src/runner.c update_group_timer"
+% % CONF=0
+% %@END
+
+\subsection*{Code excerpt: group\_end computation (TODO)}
+\begin{lstlisting}
+/* TODO: EXCERPT (10–40 lines) from src/runner.c update_group_timer():
+ * show seconds read, now_ms call, and rt->group_end assignment.
+ * SEARCH_TERMS: update_group_timer group_end seconds * 1000ULL now_ms
+ */
+\end{lstlisting}
 
 \section{Group order and item order}
 The runner maintains two independent shuffled sequences:
@@ -1739,22 +1943,32 @@ This struct is allocated as a single static global (\sym{g\_app}).
 
 % %@RS[ID=SRC_RS_APP_GLOBAL_LAYOUT_EXCERPT_V1]
 % % CLAIM="The app-level state is a static global struct containing the Session, Rng, and fixed-size order arrays; this defines lifetimes and avoids heap allocation."
-% % STATE=UNVERIFIED
-% % NEEDS_RESEARCH=YES
-% % GAPS="Need excerpt showing struct app definition and the static g_app declaration in src/app.c."
-% % NEXT_ACTION="Extract a 10–40 line excerpt from src/app.c covering struct app { ... } and static struct app g_app."
+% % STATE=VERIFIED
+% % NEEDS_RESEARCH=NO
+% % GAPS="None."
+% % NEXT_ACTION="None."
 % % SEARCH_TERMS="struct app { struct Session static struct app g_app group_order item_order"
-% % EVIDENCE="TODO: EX excerpt from src/app.c struct app / g_app"
-% % CONF=0
+% % EVIDENCE="See excerpt below showing struct app layout and the static g_app allocation."
+% % CONF=2
 % %@END
 
-\subsection*{Code excerpt: app global layout (TODO)}
+\subsection*{Code excerpt: app global layout}
 \begin{lstlisting}
-/* TODO: EXCERPT (10–40 lines) from src/app.c showing struct app and g_app:
- * show Session/Rng members and order arrays sized by MAX_* constants.
- * SEARCH_TERMS: struct app static struct app g_app group_order item_order
- */
+struct app {
+	struct Session session;
+	struct Rng rng;
+	size_t group_order[MAX_GROUPS];
+	size_t item_order[MAX_ITEMS_PER_GROUP];
+};
+
+static struct app g_app;
 \end{lstlisting}
+
+This is the codebase’s ownership model in its simplest form: the entire program state is a single static global, and every subsystem operates on references into that global. There is no heap allocation in the steady-state path because the major buffers (session text, parsed groups/items, and order scratch space) are all compile-time sized by \filep{include/config.h}.
+
+The two order arrays (\sym{group\_order} and \sym{item\_order}) are the runner’s scratch space for shuffling and iteration. Keeping them inside \sym{g\_app} makes their lifetime “whole process” without requiring any explicit init/free logic, which aligns with the CLI-like nature of the program (parse one file, run, exit).
+
+The tradeoff is that the configuration bounds become architectural: \sym{MAX\_GROUPS} and \sym{MAX\_ITEMS\_PER\_GROUP} are not merely parser limits, they also determine the memory footprint of the process. That is consistent with the overall philosophy seen throughout the repo: prefer predictable, bounded resource usage and simple lifetimes over dynamic growth and complex cleanup.
 
 \section{Error reporting strategy}
 The boundary between “library-ish code” and “CLI user” is mostly at \filep{src/main.c} and \filep{src/app.c}:
@@ -1802,5 +2016,36 @@ The correct lever for memory footprint and maximum accepted sizes is \filep{incl
 \end{itemize}
 
 \pitfall{Raising limits}{Increasing \sym{MAX\_...} constants increases static memory and can make the program unusable on constrained machines. The code assumes these are “large but finite”, not “infinite”.}
+
+\section{Verification procedures}
+The document describes behavior precisely, but it currently lacks a concrete “do this and observe that” checklist. The most important verification tasks should be reproducible with the existing binary and the existing example files in \filep{examples/}.
+
+% %@RS[ID=SRC_RS_VERIFICATION_CHECKLIST_V1]
+% % CLAIM="A reader can validate key runtime semantics (pending-switch, wait-loop bounds, logging tags) by running the program on examples/ and inspecting the emitted cram.log."
+% % STATE=UNVERIFIED
+% % NEEDS_RESEARCH=YES
+% % GAPS="Need a step-by-step verification checklist with exact commands and expected observable outputs (log tags/ordering), without adding new tooling."
+% % NEXT_ACTION="Draft a short verification subsection in the appendix with commands like './cram examples/times_tables' and concrete checks in cram.log (presence/order of start/prompt/key/expired/group/exit). Confirm actual log contents by running locally."
+% % SEARCH_TERMS="examples/times_tables cram.log start prompt key expired group exit wait loop exceeded"
+% % EVIDENCE="TODO: Add a verification checklist and, optionally, a small sample log excerpt."
+% % CONF=0
+% %@END
+
+\begin{lstlisting}
+TODO: VERIFICATION CHECKLIST (reader-facing)
+
+1) Basic run produces a log:
+   - Run: ./cram examples/times_tables
+   - Expect: cram.log exists and begins with a [start] line and later [exit]
+
+2) Key logging:
+   - Press a few keys; expect [key] entries with decimal codes
+
+3) Expiry and pending-switch:
+   - Wait for a group to expire; expect [expired] then, after the next advance key, a [group] switch event
+
+4) Shuffle events:
+   - Run long enough; expect [shuffle] groups and [items] events
+\end{lstlisting}
 
 \end{document}
