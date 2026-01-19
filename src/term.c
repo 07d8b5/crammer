@@ -42,9 +42,11 @@ int term_enter_raw(struct TermState* state, char* err_buf, size_t err_len) {
     return -1;
   if (!validate_ok(err_len > 0))
     return -1;
-  if (!assert_ok(state->active == 0 || state->active == 1))
+  int active = state->active;
+
+  if (!assert_ok(active == 0 || active == 1))
     return -1;
-  if (!assert_ok(state->active == 0))
+  if (!assert_ok(active == 0))
     return -1;
 
   int rc = tcgetattr(STDIN_FILENO, &state->original);
@@ -88,9 +90,11 @@ int term_enter_raw(struct TermState* state, char* err_buf, size_t err_len) {
 int term_restore(struct TermState* state) {
   if (!validate_ptr(state))
     return -1;
-  if (!assert_ok(state->active == 0 || state->active == 1))
+  int active = state->active;
+
+  if (!assert_ok(active == 0 || active == 1))
     return -1;
-  if (!state->active)
+  if (!active)
     return 0;
   if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &state->original) != 0) {
     state->active = 0;
