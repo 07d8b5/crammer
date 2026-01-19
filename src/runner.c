@@ -252,7 +252,10 @@ static int advance_prompt(
   if (!assert_ok(rt->group_index < c->session->group_count))
     return -1;
 
-  size_t count = c->session->groups[rt->group_index].item_count;
+  struct Session* session = c->session;
+  size_t group_index = rt->group_index;
+  const struct Group* group = &session->groups[group_index];
+  size_t count = group->item_count;
 
   if (!assert_ok(count > 0))
     return -1;
