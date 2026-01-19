@@ -294,17 +294,19 @@ static int parse_session_buffer(
   state.has_group = 0;
   state.current_group = 0;
 
+  size_t buf_len = session->buffer_len;
+  char* buf = session->buffer;
   size_t line_start = 0;
 
   for (size_t i = 0; i <= MAX_FILE_BYTES; i++) {
-    if (i == session->buffer_len || session->buffer[i] == '\n') {
+    if (i == buf_len || buf[i] == '\n') {
       size_t line_len = i - line_start;
 
-      if (line_len > 0 && session->buffer[line_start + line_len - 1] == '\r')
+      if (line_len > 0 && buf[line_start + line_len - 1] == '\r')
         line_len--;
       if (line_len > MAX_LINE_LEN)
         return set_error_line(err_buf, err_len, state.line_no, "line too long");
-      char* line = &session->buffer[line_start];
+      char* line = &buf[line_start];
 
       line[line_len] = '\0';
       int rc = handle_line(
@@ -313,7 +315,7 @@ static int parse_session_buffer(
         return -1;
       line_start = i + 1;
       state.line_no++;
-      if (i == session->buffer_len)
+      if (i == buf_len)
         break;
     }
   }
