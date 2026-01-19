@@ -50,6 +50,13 @@ This produces `bin/cram`.
 
 Linux-only (uses `termios`, `select`, and `/dev/urandom`).
 
+## Lint / style
+Formatting follows Linux kernel C style (tabs for indentation). Linting uses `checkpatch.pl`:
+```
+make lint
+```
+This requires `checkpatch.pl` from the Linux kernel tree to be in your `PATH`.
+
 ## Usage
 ```
 ./bin/cram examples/world_countries
@@ -69,6 +76,7 @@ Group changes only apply after the timer expires and you press a key.
 Compile-time limits live in `include/config.h`. Defaults:
 - `MAX_GROUPS`: 65536
 - `MAX_ITEMS_TOTAL`: 1048576 (across all groups)
+- `MAX_ITEMS_PER_GROUP`: 65536
 - `MAX_LINE_LEN`: 65536
 - `MAX_FILE_BYTES`: 16 MiB
 - `MAX_PROMPTS_PER_RUN`: 1048576
@@ -87,6 +95,12 @@ The program also exits when `MAX_PROMPTS_PER_RUN` is reached.
 - No post-init dynamic allocation.
 - Bounded loops with compile-time limits.
 - No recursion, no `goto`, no varargs, and no function pointers.
+
+## Static analysis
+For compliance workflows, run a static analyzer such as:
+```
+cppcheck --enable=all --error-exitcode=1 -Iinclude --suppress=missingIncludeSystem --suppress=checkersReport --quiet src include
+```
 
 ## Error behavior
 - Parser errors include line numbers.

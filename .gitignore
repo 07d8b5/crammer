@@ -1,7 +1,33 @@
 /bin/
+ /build/
+ /dist/
 *.o
+*.obj
 *.a
+*.lib
 *.so
+*.dll
+*.exe
+*.pdb
+*.ilk
+*.map
+*.d
 *.dSYM/
 *.out
+*.gcno
+*.gcda
+*.gcov
+*.profraw
+*.profdata
 *.log
+cram.log
+.checkpatch-camelcase.git.*
+.cache/
+.vscode/
+.idea/
+compile_commands.json
+*~
+*.swp
+*.swo
+.DS_Store
+Thumbs.db

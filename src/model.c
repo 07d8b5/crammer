@@ -1,11 +1,15 @@
+// SPDX-License-Identifier: MIT
 #include "model.h"
 
-int session_init(struct Session *session) {
-    if (!session) {
-        return -1;
-    }
-    session->buffer_len = 0;
-    session->group_count = 0;
-    session->item_count = 0;
-    return 0;
+int session_init(struct Session *session)
+{
+	if (!assert_ptr(session))
+		return -1;
+	if (!assert_ok(MAX_FILE_BYTES > 0))
+		return -1;
+
+	session->buffer_len = 0;
+	session->group_count = 0;
+	session->item_count = 0;
+	return 0;
 }
