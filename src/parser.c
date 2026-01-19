@@ -198,7 +198,7 @@ static int parse_header_line(struct Session* session,
 }
 
 static int parse_item_line(struct Session* session,
-    struct parse_state* state,
+    const struct parse_state* state,
     size_t line_start,
     size_t line_len,
     char* err_buf,
@@ -213,7 +213,11 @@ static int parse_item_line(struct Session* session,
         err_buf, err_len, state->line_no, "item before any group header");
   if (session->item_count >= MAX_ITEMS_TOTAL)
     return set_error_line(err_buf, err_len, state->line_no, "too many items");
-  struct Group* group = &session->groups[state->current_group];
+  size_t group_index = state->current_group;
+
+  if (!assert_ok(group_index < session->group_count))
+    return -1;
+  struct Group* group = &session->groups[group_index];
 
   if (group->item_count >= MAX_ITEMS_PER_GROUP)
     return set_error_line(
@@ -246,7 +250,11 @@ static int handle_line(struct Session* session,
     return 0;
   if (line[0] == '[') {
     if (state->has_group) {
-      const struct Group* group = &session->groups[state->current_group];
+      size_t group_index = state->current_group;
+
+      if (!assert_ok(group_index < session->group_count))
+        return -1;
+      const struct Group* group = &session->groups[group_index];
       if (group->item_count == 0)
         return set_error_line(
             err_buf, err_len, state->line_no, "previous group has no items");
