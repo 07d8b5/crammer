@@ -21,7 +21,7 @@ Plain UTF-8 text.
 - A group header line looks exactly like:
   `[Group name | seconds]`
   - `Group name` can be any text not containing `]`.
-  - `seconds` is a positive integer (1..86400).
+  - `seconds` is a positive integer (1..MAX_GROUP_SECONDS, default 86400).
 - The `seconds` field sets how long each group runs before switching.
 - After a header, each non-blank non-comment line is a prompt until the next header.
 - A group must have at least 1 item.
@@ -51,11 +51,16 @@ This produces `bin/cram`.
 Linux-only (uses `termios`, `select`, and `/dev/urandom`).
 
 ## Lint / style
-Formatting follows Linux kernel C style (tabs for indentation). Linting uses `checkpatch.pl`:
+Formatting is enforced with `clang-format` (see `.clang-format`).
+
+- Format: `make fmt`
+- Check formatting: `make fmt-check`
+
+Linting uses `checkpatch.pl`:
 ```
 make lint
 ```
-This requires `checkpatch.pl` from the Linux kernel tree to be in your `PATH`.
+This requires `checkpatch.pl` (the Linux kernel script) to be in `scripts/` (vendored here).
 
 ## Usage
 ```
