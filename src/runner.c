@@ -444,7 +444,11 @@ static int run_loop(const struct ctx* c, struct runtime* rt) {
     return -1;
   if (!validate_ptr(c->session))
     return -1;
-  if (!assert_ok(c->session->group_count > 0))
+
+  const struct Session* session = c->session;
+  size_t group_count = session->group_count;
+
+  if (!assert_ok(group_count > 0))
     return -1;
 
   for (size_t step = 1; step < MAX_PROMPTS_PER_RUN; step++) {
