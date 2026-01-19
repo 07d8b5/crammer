@@ -317,14 +317,16 @@ int log_input(const struct Session* session, const char* path) {
     return -1;
   if (g_log_fd < 0)
     return 0;
-  if (!assert_ok(session->buffer_len <= MAX_FILE_BYTES))
+  size_t len = session->buffer_len;
+  const char* buf = session->buffer;
+
+  if (!assert_ok(len <= MAX_FILE_BYTES))
     return -1;
-  if (!assert_ok(session->buffer[session->buffer_len] == '\0'))
+  if (!assert_ok(buf[len] == '\0'))
     return -1;
 
   u32 ck = 0;
-  int rc = cksum_bytes(
-      &ck, (const unsigned char*)session->buffer, session->buffer_len);
+  int rc = cksum_bytes(&ck, (const unsigned char*)buf, len);
   if (rc != 0)
     return -1;
 
@@ -335,15 +337,10 @@ int log_input(const struct Session* session, const char* path) {
   rc = 0;
 
   if (have_path) {
-    rc = snprintf(msg,
-        sizeof(msg),
-        "cksum=%u len=%zu path=%s",
-        ck,
-        session->buffer_len,
-        safe_path);
+    rc = snprintf(
+        msg, sizeof(msg), "cksum=%u len=%zu path=%s", ck, len, safe_path);
   } else {
-    rc =
-        snprintf(msg, sizeof(msg), "cksum=%u len=%zu", ck, session->buffer_len);
+    rc = snprintf(msg, sizeof(msg), "cksum=%u len=%zu", ck, len);
   }
   if (rc < 0 || (size_t)rc >= sizeof(msg))
     return -1;
