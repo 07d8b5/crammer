@@ -170,13 +170,13 @@ static int select_next_group(const struct ctx* c, struct runtime* rt) {
 
   const struct Session* session = c->session;
   size_t group_count = session->group_count;
+  size_t* group_order = c->group_order;
 
   if (!assert_ok(group_count > 0))
     return -1;
 
   if (rt->order_pos >= group_count) {
     struct Rng* rng = c->rng;
-    size_t* group_order = c->group_order;
     int rc = rng_shuffle_groups(rng, group_order, group_count);
     if (rc != 0)
       return -1;
@@ -185,7 +185,9 @@ static int select_next_group(const struct ctx* c, struct runtime* rt) {
     if (rc != 0)
       return -1;
   }
-  rt->group_index = c->group_order[rt->order_pos];
+  size_t order_pos = rt->order_pos;
+
+  rt->group_index = group_order[order_pos];
   if (!assert_ok(rt->group_index < group_count))
     return -1;
   rt->order_pos++;
@@ -218,7 +220,10 @@ static int select_next_item(const struct ctx* c, struct runtime* rt) {
 
   if (rt->item_pos >= count)
     rt->item_pos = 0;
-  rt->item_index = c->item_order[rt->item_pos];
+  size_t item_pos = rt->item_pos;
+  const size_t* item_order = c->item_order;
+
+  rt->item_index = item_order[item_pos];
   return 0;
 }
 
@@ -229,11 +234,12 @@ static int update_group_timer(const struct ctx* c, struct runtime* rt) {
     return -1;
   if (!validate_ptr(c->session))
     return -1;
-  if (!assert_ok(rt->group_index < c->session->group_count))
-    return -1;
-
   struct Session* session = c->session;
+  size_t group_count = session->group_count;
   size_t group_index = rt->group_index;
+
+  if (!assert_ok(group_index < group_count))
+    return -1;
   const struct Group* group = &session->groups[group_index];
   unsigned int seconds = group->seconds;
 
@@ -261,11 +267,12 @@ static int advance_prompt(
     return -1;
   if (!validate_ptr(c->rng))
     return -1;
-  if (!assert_ok(rt->group_index < c->session->group_count))
-    return -1;
-
   struct Session* session = c->session;
+  size_t group_count = session->group_count;
   size_t group_index = rt->group_index;
+
+  if (!assert_ok(group_index < group_count))
+    return -1;
   const struct Group* group = &session->groups[group_index];
   size_t count = group->item_count;
 
@@ -311,10 +318,12 @@ static int advance_prompt(
 
   if (rc != 0)
     return -1;
-  rc = draw_prompt(c->session, rt->item_index);
+  size_t item_index = rt->item_index;
+
+  rc = draw_prompt(session, item_index);
   if (rc != 0)
     return -1;
-  rc = log_prompt(c->session, rt->group_index, rt->item_index);
+  rc = log_prompt(session, group_index, item_index);
   if (rc != 0)
     return -1;
   return 0;
@@ -330,7 +339,11 @@ static int update_expiry(
     return -1;
   if (!validate_ptr(c->session))
     return -1;
-  if (!assert_ok(rt->group_index < c->session->group_count))
+  const struct Session* session = c->session;
+  size_t group_count = session->group_count;
+  size_t group_index = rt->group_index;
+
+  if (!assert_ok(group_index < group_count))
     return -1;
 
   *remaining_ms = 0;
@@ -530,10 +543,12 @@ static int init_runtime(const struct ctx* c, struct runtime* rt) {
   rc = select_next_item(c, rt);
   if (rc != 0)
     return -1;
-  rc = draw_prompt(c->session, rt->item_index);
+  size_t item_index = rt->item_index;
+
+  rc = draw_prompt(session, item_index);
   if (rc != 0)
     return -1;
-  rc = log_prompt(c->session, rt->group_index, rt->item_index);
+  rc = log_prompt(session, group_index, item_index);
   if (rc != 0)
     return -1;
   rc = update_group_timer(c, rt);
