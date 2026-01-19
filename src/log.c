@@ -23,19 +23,32 @@ static u32 cksum_update(u32 crc, unsigned char b) {
   return crc;
 }
 
-static u32 cksum_bytes(const unsigned char* buf, size_t len) {
+static int cksum_bytes(u32* out, const unsigned char* buf, size_t len) {
+  if (!validate_ptr(out))
+    return -1;
+  if (!validate_ptr(buf))
+    return -1;
+  if (!assert_ok(len <= MAX_FILE_BYTES))
+    return -1;
+
   u32 crc = 0;
 
-  for (size_t i = 0; i < len; i++)
+  for (size_t i = 0; i < MAX_FILE_BYTES; i++) {
+    if (i >= len)
+      break;
     crc = cksum_update(crc, buf[i]);
+  }
 
   size_t n = len;
 
-  while (n != 0) {
+  for (size_t i = 0; i < sizeof(size_t); i++) {
+    if (n == 0)
+      break;
     crc = cksum_update(crc, (unsigned char)(n & 0xFF));
     n >>= 8;
   }
-  return ~crc;
+  *out = ~crc;
+  return 0;
 }
 
 static size_t sanitize_path(const char* path, char* out, size_t out_len) {
@@ -231,11 +244,17 @@ int log_prompt(
   const unsigned char* ibytes =
       (const unsigned char*)&session->buffer[item->offset];
 
-  u32 gck = cksum_bytes(gname, (size_t)group->name_length);
-  u32 ick = cksum_bytes(ibytes, (size_t)item->length);
+  u32 gck = 0;
+  int rc = cksum_bytes(&gck, gname, (size_t)group->name_length);
+  if (rc != 0)
+    return -1;
+  u32 ick = 0;
+  rc = cksum_bytes(&ick, ibytes, (size_t)item->length);
+  if (rc != 0)
+    return -1;
 
   char msg[96];
-  int rc = snprintf(msg,
+  rc = snprintf(msg,
       sizeof(msg),
       "group=%zu item=%zu gck=%u glen=%u ick=%u ilen=%u",
       group_index,
@@ -297,14 +316,17 @@ int log_input(const struct Session* session, const char* path) {
   if (!assert_ok(session->buffer[session->buffer_len] == '\0'))
     return -1;
 
-  u32 ck =
-      cksum_bytes((const unsigned char*)session->buffer, session->buffer_len);
+  u32 ck = 0;
+  int rc = cksum_bytes(
+      &ck, (const unsigned char*)session->buffer, session->buffer_len);
+  if (rc != 0)
+    return -1;
 
   char safe_path[192];
   size_t have_path = sanitize_abs_path(path, safe_path, sizeof(safe_path));
 
   char msg[256];
-  int rc = 0;
+  rc = 0;
 
   if (have_path) {
     rc = snprintf(msg,
