@@ -1367,7 +1367,7 @@ There is also an error boundary inside the “non-fatal” path: if even the war
 \begin{evidenceblock}
 {Most log functions return success without doing anything when \sym{g\_log\_fd < 0}.}
 {src/log.c}
-{\sym{log\_simple}, \sym{log\_key}, \sym{log\_prompt}, \sym{log\_group}, \sym{log\_shuffle}}
+{\sym{log\_simple}, \sym{log\_key}, \sym{log\_prompt}, \sym{log\_group}, \sym{log\_shuffle}, \sym{log\_input}}
 {This implements the “best-effort logging” policy.}
 \end{evidenceblock}
 
@@ -1386,8 +1386,8 @@ There is also an error boundary inside the “non-fatal” path: if even the war
 \begin{evidenceblock}
 {The log tag set is enumerable from literal strings in \filep{src/log.c} and a small set of tag literals passed by \filep{src/runner.c}.}
 {src/log.c, src/runner.c}
-{\sym{log\_open}, \sym{log\_close}, \sym{log\_key}, \sym{log\_prompt}, \sym{log\_group}, \sym{log\_shuffle}}
-{Tags emitted by \filep{src/log.c}: \off{start}, \off{exit}, \off{key}, \off{prompt}. Tags supplied by the runner: \off{group}, \off{expired}, \off{shuffle}, \off{items}, \off{error}.}
+{\sym{log\_open}, \sym{log\_close}, \sym{log\_key}, \sym{log\_prompt}, \sym{log\_group}, \sym{log\_shuffle}, \sym{log\_input}}
+{Tags emitted by \filep{src/log.c}: \off{start}, \off{exit}, \off{key}, \off{prompt}, \off{file}. Tags supplied by the runner: \off{group}, \off{expired}, \off{shuffle}, \off{items}, \off{error}.}
 \end{evidenceblock}
 
 \subsection*{Code excerpt: \sym{log\_close} emits \off{exit}}
@@ -1419,7 +1419,7 @@ int log_key(int key)
 	return log_write("key", msg);
 }
 
-int log_prompt(size_t group_index, size_t item_index)
+int log_prompt(const struct Session *session, size_t group_index, size_t item_index)
 {
 	...
 	if (g_log_fd < 0)
@@ -1432,15 +1432,18 @@ int log_prompt(size_t group_index, size_t item_index)
 \begin{longtable}{>{\raggedright\arraybackslash}p{0.18\linewidth} >{\raggedright\arraybackslash}p{0.32\linewidth} >{\raggedright\arraybackslash}p{0.42\linewidth}}
 \textbf{Tag} & \textbf{Emitter(s)} & \textbf{Meaning / When it fires}\\\hline
 \texttt{start} & \sym{log\_open} & Session begins; emitted only when the log file opens successfully.\\
+\texttt{file} & \sym{log\_input} (called by app) & Input identity; payload includes \texttt{cksum=<u32> len=<bytes>} and may include \texttt{path=<string>}.\\
 \texttt{exit} & \sym{log\_close} & Session ends; emitted just before closing the log fd.\\
 \texttt{key} & \sym{log\_key} (called by runner) & Raw key observed; message payload is \texttt{key=<decimal>}.\\
-\texttt{prompt} & \sym{log\_prompt} (called by runner) & Prompt drawn; payload is \texttt{group=<g> item=<i>}.\\
+\texttt{prompt} & \sym{log\_prompt} (called by runner) & Prompt drawn; payload includes \texttt{group=<g> item=<i>} plus \texttt{gck/glen} and \texttt{ick/ilen} checksums/lengths.\\
 \texttt{group} & \sym{log\_group("group", ...)} (runner) & Group switch applied; payload is \texttt{group=<g>}.\\
 \texttt{expired} & \sym{log\_group("expired", ...)} (runner) & Group timer expired; payload is \texttt{group=<g>}; switch becomes pending.\\
 \texttt{shuffle} & \sym{log\_simple("shuffle", "groups")} (runner) & Group order reshuffled; payload is the literal \texttt{groups}.\\
 \texttt{items} & \sym{log\_shuffle("items", ...)} (runner) & Item order reshuffled for a group; payload is \texttt{group=<g>}.\\
 \texttt{error} & \sym{log\_simple("error", "wait loop exceeded")} (runner) & Bounded wait loop exceeded without advancing; session fails.\\
 \end{longtable}
+
+The \texttt{cksum} values are compatible with the ubiquitous POSIX \texttt{cksum(1)} tool: you can reproduce the file-level \texttt{cksum/len} by running \texttt{cksum <session\_file>}.
 
 \section{Timestamp and line format}
 \sym{log\_write} timestamps with \off{CLOCK\_REALTIME} and formats lines like:
