@@ -1,0 +1,81 @@
+# Rigid clang-format configuration (LLVM-oriented).
+#
+# Notes:
+# - This is intentionally opinionated and consistent (LLVM-based), not
+#   "kernel-style".
+# - Formatting does not imply safety; pair this with warnings/static analysis
+#   if you want safety-critical discipline.
+#
+# Intended usage:
+#   - Apply:     make fmt
+#   - Check:     make fmt-check
+---
+BasedOnStyle: LLVM
+
+ColumnLimit: 80
+IndentWidth: 2
+TabWidth: 8
+ContinuationIndentWidth: 4
+UseTab: Never
+
+BreakBeforeBraces: Attach
+IndentCaseLabels: true
+IndentCaseBlocks: false
+IndentGotoLabels: true
+
+DerivePointerAlignment: false
+PointerAlignment: Left
+
+SortIncludes: Never
+SortUsingDeclarations: false
+IncludeBlocks: Preserve
+
+AlignAfterOpenBracket: DontAlign
+AlignOperands: false
+AlignConsecutiveAssignments: false
+AlignConsecutiveDeclarations: false
+AlignTrailingComments: false
+AlignEscapedNewlines: DontAlign
+
+BinPackArguments: false
+BinPackParameters: false
+
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLoopsOnASingleLine: false
+AllowShortBlocksOnASingleLine: Never
+AllowShortCaseLabelsOnASingleLine: false
+AllowShortFunctionsOnASingleLine: None
+AllowShortEnumsOnASingleLine: false
+AllowShortLambdasOnASingleLine: None
+
+SpaceBeforeParens: ControlStatements
+SpacesInParentheses: false
+SpacesInSquareBrackets: false
+SpacesInAngles: false
+SpaceBeforeRangeBasedForLoopColon: true
+SpaceBeforeAssignmentOperators: true
+SpaceAfterCStyleCast: false
+
+Cpp11BracedListStyle: false
+
+# Keep kernel-ish line breaking and avoid "pretty alignment" that creates churn.
+BreakBeforeBinaryOperators: None
+BreakBeforeTernaryOperators: false
+BreakStringLiterals: false
+PenaltyBreakAssignment: 2
+PenaltyBreakComment: 300
+PenaltyBreakString: 1000
+PenaltyBreakFirstLessLess: 120
+PenaltyReturnTypeOnItsOwnLine: 200
+
+# Misc defaults that usually match rigid formatting expectations.
+ReflowComments: false
+KeepEmptyLinesAtTheStartOfBlocks: false
+MaxEmptyLinesToKeep: 1
+SpacesBeforeTrailingComments: 1
+CompactNamespaces: false
+IndentExternBlock: NoIndent
+NamespaceIndentation: None
+FixNamespaceComments: false
+EmptyLineBeforeAccessModifier: Never
+...

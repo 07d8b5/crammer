@@ -7,11 +7,11 @@
 struct Session;
 struct Rng;
 
-int runner_run(struct Session *session,
-	       struct Rng *rng,
-	       size_t *group_order,
-	       size_t group_order_cap,
-	       size_t *item_order,
-	       size_t item_order_cap);
+int runner_run(struct Session* session,
+    struct Rng* rng,
+    size_t* group_order,
+    size_t group_order_cap,
+    size_t* item_order,
+    size_t item_order_cap);
 
 #endif

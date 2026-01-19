@@ -4,7 +4,7 @@
 
 #include "model.h"
 
-int parse_session_file(const char *path, struct Session *session,
-		       char *err_buf, size_t err_len);
+int parse_session_file(
+    const char* path, struct Session* session, char* err_buf, size_t err_len);
 
 #endif
