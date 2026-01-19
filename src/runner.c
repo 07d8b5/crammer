@@ -115,8 +115,11 @@ static int init_group_order(const struct ctx* c) {
   if (assert_session_bounds(c->session) != 0)
     return -1;
 
+  const struct Session* session = c->session;
+  size_t group_count = session->group_count;
+
   for (size_t i = 0; i < MAX_GROUPS; i++) {
-    if (i >= c->session->group_count)
+    if (i >= group_count)
       break;
     c->group_order[i] = i;
   }
